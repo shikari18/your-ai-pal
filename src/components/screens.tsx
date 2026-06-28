@@ -274,10 +274,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 // ---------- Onboarding 1: Pond photo ----------
-export function Onboarding1({ user, onNext, onSkip }: { user: User; onNext: (analysis?: string) => void; onSkip: () => void }) {
+export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: string) => void; onSkip?: () => void }) {
   const analyze = useServerFn(analyzePondImage);
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<string | null>(() => Store.getFarm().pondPhotoAnalysis ?? null);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -308,7 +308,7 @@ export function Onboarding1({ user, onNext, onSkip }: { user: User; onNext: (ana
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Upload size={28} color={COLOR.gold} />
-              <div className="text-[13px]" style={{ color: COLOR.muted }}>Tap to upload pond photo</div>
+              <div className="text-[13px]" style={{ color: COLOR.muted }}>{analysis ? "Replace pond photo" : "Tap to upload pond photo"}</div>
             </div>
           )}
         </button>
@@ -317,8 +317,8 @@ export function Onboarding1({ user, onNext, onSkip }: { user: User; onNext: (ana
         {analysis && <AmaBubble>{analysis}</AmaBubble>}
         {err && <div className="text-[12px]" style={{ color: COLOR.danger }}>{err}</div>}
 
-        <Btn onClick={() => onNext(analysis ?? undefined)}>Next</Btn>
-        <button onClick={onSkip} className="block w-full text-center text-[13px]" style={{ color: COLOR.muted }}>Skip</button>
+        <Btn onClick={() => onNext(analysis ?? undefined)} disabled={!analysis}>Next</Btn>
+        {!analysis && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>Please upload a pond photo to continue</div>}
       </div>
     </Shell>
   );
