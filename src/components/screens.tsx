@@ -403,16 +403,60 @@ export function Onboarding3({ onDone }: { onDone: () => void }) {
 
         <Card>
           <Eyebrow gold>Fish type</Eyebrow>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            {(["Tilapia", "Catfish"] as const).map((t) => {
-              const a = farm.fishType === t;
-              return (
-                <button key={t} onClick={() => set("fishType", t)} className="rounded-xl p-4 flex flex-col items-center gap-2" style={{ border: `1px solid ${a ? COLOR.gold : COLOR.div}`, color: a ? COLOR.gold : COLOR.muted }}>
-                  <Fish size={22} />
-                  <span className="text-[13px] font-semibold">{t}</span>
-                </button>
-              );
-            })}
+          <input
+            list="fish-suggestions"
+            value={farm.fishType}
+            onChange={(e) => set("fishType", e.target.value)}
+            placeholder="Search or type (e.g. Tilapia, Catfish, Heterotis)"
+            className="mt-3 w-full rounded-xl px-3 h-11 bg-transparent outline-none text-[14px]"
+            style={{ background: COLOR.card2, color: COLOR.text, border: `1px solid ${COLOR.div}` }}
+          />
+          <datalist id="fish-suggestions">
+            {["Tilapia","Catfish","Heterotis","Mudfish","Carp","Snakehead","African Bonytongue","Electric Catfish","Trout","Goldfish"].map((s) => <option key={s} value={s} />)}
+          </datalist>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {["Tilapia","Catfish","Heterotis","Carp"].map((s) => (
+              <button key={s} type="button" onClick={() => set("fishType", s)} className="rounded-full px-2.5 py-1 text-[11px]" style={{ border: `1px solid ${farm.fishType === s ? COLOR.gold : COLOR.div}`, color: farm.fishType === s ? COLOR.gold : COLOR.muted }}>{s}</button>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between">
+            <Eyebrow gold>Do you have any other fish? (optional)</Eyebrow>
+            {(farm.extraFish?.length ?? 0) < 2 && (
+              <button type="button" onClick={() => set("extraFish", [...(farm.extraFish ?? []), { type: "", count: 0 }])} className="text-[11px]" style={{ color: COLOR.gold }}>+ Add</button>
+            )}
+          </div>
+          <div className="mt-3 space-y-2">
+            {(farm.extraFish ?? []).map((ef, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  list="fish-suggestions"
+                  value={ef.type}
+                  onChange={(e) => {
+                    const next = [...(farm.extraFish ?? [])]; next[i] = { ...next[i], type: e.target.value }; set("extraFish", next);
+                  }}
+                  placeholder="Type"
+                  className="flex-1 rounded-lg px-2 h-10 bg-transparent outline-none text-[13px]"
+                  style={{ background: COLOR.card2, color: COLOR.text, border: `1px solid ${COLOR.div}` }}
+                />
+                <input
+                  inputMode="numeric"
+                  value={ef.count || ""}
+                  onChange={(e) => {
+                    const next = [...(farm.extraFish ?? [])]; next[i] = { ...next[i], count: Number(e.target.value.replace(/[^0-9]/g, "")) || 0 }; set("extraFish", next);
+                  }}
+                  placeholder="How many"
+                  className="w-24 rounded-lg px-2 h-10 bg-transparent outline-none text-[13px] text-center"
+                  style={{ background: COLOR.card2, color: COLOR.text, border: `1px solid ${COLOR.div}` }}
+                />
+                <button type="button" onClick={() => { const next = (farm.extraFish ?? []).filter((_, j) => j !== i); set("extraFish", next); }} className="p-1.5"><X size={16} color={COLOR.muted} /></button>
+              </div>
+            ))}
+            {(farm.extraFish?.length ?? 0) === 0 && (
+              <div className="text-[12px]" style={{ color: COLOR.muted }}>You can add up to 2 other fish types.</div>
+            )}
           </div>
         </Card>
 
@@ -432,10 +476,19 @@ export function Onboarding3({ onDone }: { onDone: () => void }) {
 
         <Card>
           <Eyebrow gold>Stocking date</Eyebrow>
-          <input type="date" value={farm.stockDate} onChange={(e) => set("stockDate", e.target.value)} className="mt-2 w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text, colorScheme: "dark" }} />
+          <input type="date" required value={farm.stockDate} onChange={(e) => set("stockDate", e.target.value)} className="mt-2 w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text, colorScheme: "dark" }} />
         </Card>
 
-        <Btn onClick={onDone} disabled={!farm.fishType || !farm.fishSize || farm.fishCount <= 0}>Finish Setup</Btn>
+        {(() => {
+          const extraOk = (farm.extraFish ?? []).every((e) => e.type.trim() && e.count > 0);
+          const disabled = !farm.fishType.trim() || !farm.fishSize || farm.fishCount <= 0 || !farm.stockDate || !extraOk;
+          return (
+            <>
+              <Btn onClick={onDone} disabled={disabled}>Finish Setup</Btn>
+              {disabled && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>All fields are required. Optional extra fish need both type and count.</div>}
+            </>
+          );
+        })()}
       </div>
     </Shell>
   );
