@@ -152,7 +152,15 @@ export function BottomNav({ current, onGo, notifCount }: { current: Screen; onGo
     { key: "profile", label: "Profile", Icon: SettingsIcon },
   ];
   return (
-    <nav className="sticky bottom-0 left-0 right-0 px-4 pt-3 pb-6" style={{ background: COLOR.bg, borderTop: `1px solid ${COLOR.div}` }}>
+    <nav
+      className="sticky bottom-0 left-0 right-0 px-4 pt-3 pb-6"
+      style={{
+        background: COLOR.card,
+        borderTop: `1px solid ${COLOR.div}`,
+        borderTopLeftRadius: 9,
+        borderTopRightRadius: 9,
+      }}
+    >
       <ul className="flex items-center justify-around">
         {items.map(({ key, label, Icon }) => {
           const active = current === key;
@@ -266,10 +274,10 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 // ---------- Onboarding 1: Pond photo ----------
-export function Onboarding1({ user, onNext, onSkip }: { user: User; onNext: (analysis?: string) => void; onSkip: () => void }) {
+export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: string) => void; onSkip?: () => void }) {
   const analyze = useServerFn(analyzePondImage);
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analysis, setAnalysis] = useState<string | null>(() => Store.getFarm().pondPhotoAnalysis ?? null);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -300,7 +308,7 @@ export function Onboarding1({ user, onNext, onSkip }: { user: User; onNext: (ana
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Upload size={28} color={COLOR.gold} />
-              <div className="text-[13px]" style={{ color: COLOR.muted }}>Tap to upload pond photo</div>
+              <div className="text-[13px]" style={{ color: COLOR.muted }}>{analysis ? "Replace pond photo" : "Tap to upload pond photo"}</div>
             </div>
           )}
         </button>
@@ -309,8 +317,8 @@ export function Onboarding1({ user, onNext, onSkip }: { user: User; onNext: (ana
         {analysis && <AmaBubble>{analysis}</AmaBubble>}
         {err && <div className="text-[12px]" style={{ color: COLOR.danger }}>{err}</div>}
 
-        <Btn onClick={() => onNext(analysis ?? undefined)}>Next</Btn>
-        <button onClick={onSkip} className="block w-full text-center text-[13px]" style={{ color: COLOR.muted }}>Skip</button>
+        <Btn onClick={() => onNext(analysis ?? undefined)} disabled={!analysis}>Next</Btn>
+        {!analysis && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>Please upload a pond photo to continue</div>}
       </div>
     </Shell>
   );
@@ -365,7 +373,8 @@ export function Onboarding2({ onNext }: { onNext: () => void }) {
         )}
         {status && <div className="text-[12px]" style={{ color: COLOR.muted }}>{status}</div>}
 
-        <Btn onClick={onNext}>Next</Btn>
+        <Btn onClick={onNext} disabled={!farm.lat || !farm.lon}>Next</Btn>
+        {(!farm.lat || !farm.lon) && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>Please share or enter your location to continue</div>}
       </div>
     </Shell>
   );
@@ -394,16 +403,60 @@ export function Onboarding3({ onDone }: { onDone: () => void }) {
 
         <Card>
           <Eyebrow gold>Fish type</Eyebrow>
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            {(["Tilapia", "Catfish"] as const).map((t) => {
-              const a = farm.fishType === t;
-              return (
-                <button key={t} onClick={() => set("fishType", t)} className="rounded-xl p-4 flex flex-col items-center gap-2" style={{ border: `1px solid ${a ? COLOR.gold : COLOR.div}`, color: a ? COLOR.gold : COLOR.muted }}>
-                  <Fish size={22} />
-                  <span className="text-[13px] font-semibold">{t}</span>
-                </button>
-              );
-            })}
+          <input
+            list="fish-suggestions"
+            value={farm.fishType}
+            onChange={(e) => set("fishType", e.target.value)}
+            placeholder="Search or type (e.g. Tilapia, Catfish, Heterotis)"
+            className="mt-3 w-full rounded-xl px-3 h-11 bg-transparent outline-none text-[14px]"
+            style={{ background: COLOR.card2, color: COLOR.text, border: `1px solid ${COLOR.div}` }}
+          />
+          <datalist id="fish-suggestions">
+            {["Tilapia","Catfish","Heterotis","Mudfish","Carp","Snakehead","African Bonytongue","Electric Catfish","Trout","Goldfish"].map((s) => <option key={s} value={s} />)}
+          </datalist>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {["Tilapia","Catfish","Heterotis","Carp"].map((s) => (
+              <button key={s} type="button" onClick={() => set("fishType", s)} className="rounded-full px-2.5 py-1 text-[11px]" style={{ border: `1px solid ${farm.fishType === s ? COLOR.gold : COLOR.div}`, color: farm.fishType === s ? COLOR.gold : COLOR.muted }}>{s}</button>
+            ))}
+          </div>
+        </Card>
+
+        <Card>
+          <div className="flex items-center justify-between">
+            <Eyebrow gold>Do you have any other fish? (optional)</Eyebrow>
+            {(farm.extraFish?.length ?? 0) < 2 && (
+              <button type="button" onClick={() => set("extraFish", [...(farm.extraFish ?? []), { type: "", count: 0 }])} className="text-[11px]" style={{ color: COLOR.gold }}>+ Add</button>
+            )}
+          </div>
+          <div className="mt-3 space-y-2">
+            {(farm.extraFish ?? []).map((ef, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <input
+                  list="fish-suggestions"
+                  value={ef.type}
+                  onChange={(e) => {
+                    const next = [...(farm.extraFish ?? [])]; next[i] = { ...next[i], type: e.target.value }; set("extraFish", next);
+                  }}
+                  placeholder="Type"
+                  className="flex-1 rounded-lg px-2 h-10 bg-transparent outline-none text-[13px]"
+                  style={{ background: COLOR.card2, color: COLOR.text, border: `1px solid ${COLOR.div}` }}
+                />
+                <input
+                  inputMode="numeric"
+                  value={ef.count || ""}
+                  onChange={(e) => {
+                    const next = [...(farm.extraFish ?? [])]; next[i] = { ...next[i], count: Number(e.target.value.replace(/[^0-9]/g, "")) || 0 }; set("extraFish", next);
+                  }}
+                  placeholder="How many"
+                  className="w-24 rounded-lg px-2 h-10 bg-transparent outline-none text-[13px] text-center"
+                  style={{ background: COLOR.card2, color: COLOR.text, border: `1px solid ${COLOR.div}` }}
+                />
+                <button type="button" onClick={() => { const next = (farm.extraFish ?? []).filter((_, j) => j !== i); set("extraFish", next); }} className="p-1.5"><X size={16} color={COLOR.muted} /></button>
+              </div>
+            ))}
+            {(farm.extraFish?.length ?? 0) === 0 && (
+              <div className="text-[12px]" style={{ color: COLOR.muted }}>You can add up to 2 other fish types.</div>
+            )}
           </div>
         </Card>
 
@@ -423,10 +476,19 @@ export function Onboarding3({ onDone }: { onDone: () => void }) {
 
         <Card>
           <Eyebrow gold>Stocking date</Eyebrow>
-          <input type="date" value={farm.stockDate} onChange={(e) => set("stockDate", e.target.value)} className="mt-2 w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text, colorScheme: "dark" }} />
+          <input type="date" required value={farm.stockDate} onChange={(e) => set("stockDate", e.target.value)} className="mt-2 w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text, colorScheme: "dark" }} />
         </Card>
 
-        <Btn onClick={onDone} disabled={!farm.fishType || !farm.fishSize || farm.fishCount <= 0}>Finish Setup</Btn>
+        {(() => {
+          const extraOk = (farm.extraFish ?? []).every((e) => e.type.trim() && e.count > 0);
+          const disabled = !farm.fishType.trim() || !farm.fishSize || farm.fishCount <= 0 || !farm.stockDate || !extraOk;
+          return (
+            <>
+              <Btn onClick={onDone} disabled={disabled}>Finish Setup</Btn>
+              {disabled && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>All fields are required. Optional extra fish need both type and count.</div>}
+            </>
+          );
+        })()}
       </div>
     </Shell>
   );
@@ -448,8 +510,8 @@ function MainHeader({ user, onGoNotif, onGoProfile, notifCount }: { user: User; 
           <Bell size={22} color={COLOR.text} strokeWidth={1.75} />
           {notifCount > 0 && <span className="absolute top-0 right-0 h-2 w-2 rounded-full" style={{ background: COLOR.danger }} />}
         </button>
-        <button onClick={onGoProfile} className="h-10 w-10 rounded-full flex items-center justify-center text-[13px] font-bold" style={{ background: COLOR.card, border: `1.5px solid ${COLOR.gold}`, color: COLOR.text }}>
-          {initials(user.name) || "F"}
+        <button onClick={onGoProfile} className="h-10 w-10 rounded-full overflow-hidden flex items-center justify-center text-[13px] font-bold" style={{ background: COLOR.card, border: `1.5px solid ${COLOR.gold}`, color: COLOR.text }}>
+          {user.avatar ? <img src={user.avatar} alt="" className="h-full w-full object-cover" /> : (initials(user.name) || "F")}
         </button>
       </div>
     </div>
@@ -467,6 +529,7 @@ export function Dashboard({
   const hr = new Date().getHours();
   const greet = greetingForHour(hr);
   const WeatherIcon = !weather ? Cloud : weather.current.icon === "rain" ? CloudRain : weather.current.icon === "cloud" ? Cloud : Sun;
+  const briefingOn = typeof window !== "undefined" ? (localStorage.getItem("ffo.dailyBriefing") ?? "true") === "true" : true;
   return (
     <>
       <MainHeader user={user} onGoNotif={() => onGo("notifications")} onGoProfile={() => onGo("profile")} notifCount={notifs.filter((n) => !n.read).length} />
@@ -479,6 +542,7 @@ export function Dashboard({
           </div>
         </div>
 
+        {briefingOn && (
         <Card accent>
           <div className="flex items-center justify-between">
             <Eyebrow gold>AI Briefing</Eyebrow>
@@ -496,6 +560,7 @@ export function Dashboard({
             <div className="text-[10px]" style={{ color: COLOR.muted }}>{new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
           </div>
         </Card>
+        )}
 
         <div>
           <div className="text-[16px] font-bold mb-2" style={{ color: COLOR.text }}>At a Glance</div>
@@ -560,12 +625,14 @@ function Quick({ Icon, title, sub, onClick }: { Icon: typeof Fish; title: string
 // ---------- Chat ----------
 export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: () => void }) {
   const ask = useServerFn(askAma);
+  const diag = useServerFn(analyzeFishImage);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const h = Store.getChat();
     if (h.length) return h;
     return [{ id: "1", role: "assistant", ts: Date.now(), content: `Hi ${firstName(user.name)}, I'm Ama. How can I help with your fish today?` }];
   });
   const [input, setInput] = useState("");
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceCall, setVoiceCall] = useState(false);
@@ -579,18 +646,33 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
   async function send(text: string, image?: string) {
     const trimmed = text.trim();
     if (!trimmed && !image) return;
-    const userMsg: ChatMessage = { id: String(Date.now()), role: "user", content: trimmed || "(image)", image, ts: Date.now() };
+    const userMsg: ChatMessage = { id: String(Date.now()), role: "user", content: trimmed || (image ? "Please analyse this image" : ""), image, ts: Date.now() };
     const next = [...messages, userMsg];
-    setMessages(next); setInput(""); setLoading(true);
+    setMessages(next); setInput(""); setPendingImage(null); setLoading(true);
     try {
       const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region}`;
-      const { reply } = await ask({
-        data: {
-          messages: next.map((m) => ({ role: m.role, content: m.content })),
-          language: user.language,
-          farmContext: context,
-        },
-      });
+      let reply = "";
+      if (image) {
+        const { diagnosis } = await diag({ data: { imageBase64: image } });
+        reply = diagnosis;
+        if (trimmed) {
+          const { reply: extra } = await ask({
+            data: {
+              messages: [...next.map((m) => ({ role: m.role, content: m.content })), { role: "assistant", content: diagnosis }],
+              language: user.language, farmContext: context,
+            },
+          });
+          if (extra) reply = `${diagnosis}\n\n${extra}`;
+        }
+      } else {
+        const r = await ask({
+          data: {
+            messages: next.map((m) => ({ role: m.role, content: m.content })),
+            language: user.language, farmContext: context,
+          },
+        });
+        reply = r.reply;
+      }
       setMessages((m) => [...m, { id: String(Date.now() + 1), role: "assistant", content: reply || "…", ts: Date.now() }]);
       if (user.language === "Twi") speak(reply);
     } catch {
@@ -610,7 +692,8 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
   async function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
-    send("Please analyse this", dataUrl);
+    setPendingImage(dataUrl);
+    e.target.value = "";
   }
 
   function onVoiceTurn(userText: string, amaText: string) {
@@ -692,10 +775,19 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
       </div>
 
       <form
-        onSubmit={(e) => { e.preventDefault(); send(input); }}
+        onSubmit={(e) => { e.preventDefault(); send(input, pendingImage ?? undefined); }}
         className="px-3 pt-2 pb-5"
         style={{ background: COLOR.bg, borderTop: `1px solid ${COLOR.div}` }}
       >
+        {pendingImage && (
+          <div className="mb-2 flex items-start gap-2 rounded-xl p-2" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
+            <img src={pendingImage} alt="preview" className="h-16 w-16 rounded-lg object-cover" />
+            <div className="flex-1 text-[12px]" style={{ color: COLOR.muted }}>
+              Image attached. Add a message or tap send.
+            </div>
+            <button type="button" onClick={() => setPendingImage(null)} aria-label="Remove image" className="p-1"><X size={16} color={COLOR.muted} /></button>
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-full px-3 py-2" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
           <button
             type="button"
@@ -709,15 +801,15 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
           </button>
           <input
             value={input} onChange={(e) => setInput(e.target.value)}
-            placeholder={recording ? "Listening…" : "Type or speak to Ama..."}
+            placeholder={recording ? "Listening…" : pendingImage ? "Add a message (optional)" : "Type or speak to Ama..."}
             className="flex-1 bg-transparent text-[14px] outline-none"
             style={{ color: COLOR.text }}
           />
           <button type="button" onClick={() => fileRef.current?.click()} className="p-1" aria-label="Attach image">
-            <ImageIcon size={20} color={COLOR.muted} />
+            <ImageIcon size={20} color={pendingImage ? COLOR.gold : COLOR.muted} />
           </button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickImage} />
-          <button type="submit" disabled={loading || !input.trim()} aria-label="Send" className="h-9 w-9 rounded-full flex items-center justify-center disabled:opacity-50" style={{ background: COLOR.gold }}>
+          <button type="submit" disabled={loading || (!input.trim() && !pendingImage)} aria-label="Send" className="h-9 w-9 rounded-full flex items-center justify-center disabled:opacity-50" style={{ background: COLOR.gold }}>
             <Send size={16} color={COLOR.bg} />
           </button>
         </div>
@@ -1402,11 +1494,12 @@ export function CreditScore({ user, farm, onBack }: { user: User; farm: Farm; on
 }
 
 // ---------- Profile / Settings ----------
-export function Profile({ user, farm, score, onBack, onLogout, onGo }: { user: User; farm: Farm; score: number; onBack: () => void; onLogout: () => void; onGo: (s: Screen) => void }) {
+export function Profile({ user, farm, score, onBack, onLogout, onGo, onUserUpdate }: { user: User; farm: Farm; score: number; onBack: () => void; onLogout: () => void; onGo: (s: Screen) => void; onUserUpdate?: (u: User) => void }) {
   const [twi, setTwi] = useState(() => typeof window !== "undefined" && localStorage.getItem("twiVoice") === "true");
   const [briefingOn, setBriefingOn] = useState(() => typeof window !== "undefined" && (localStorage.getItem("ffo.dailyBriefing") ?? "true") === "true");
   const [notifOn, setNotifOn] = useState(() => typeof window !== "undefined" && (localStorage.getItem("ffo.notifEnabled") ?? "true") === "true");
   const [keyOpen, setKeyOpen] = useState(false); const [keyVal, setKeyVal] = useState("");
+  const avatarRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem("twiVoice", String(twi)); }, [twi]);
   useEffect(() => { localStorage.setItem("ffo.dailyBriefing", String(briefingOn)); }, [briefingOn]);
@@ -1415,13 +1508,30 @@ export function Profile({ user, farm, score, onBack, onLogout, onGo }: { user: U
 
   const tier = score <= 40 ? "NEW FARMER" : score <= 70 ? "GROWING FARMER" : "TRUSTED FARMER";
 
+  async function onAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
+    const next = { ...user, avatar: dataUrl };
+    Store.setUser(next);
+    onUserUpdate?.(next);
+    e.target.value = "";
+  }
+
   return (
     <Shell>
       <TopBar onBack={onBack} title="Profile" />
       <div className="px-5 pb-10 space-y-4">
         <Card>
           <div className="flex flex-col items-center">
-            <div className="h-20 w-20 rounded-full flex items-center justify-center text-[24px] font-bold" style={{ background: COLOR.card2, border: `2px solid ${COLOR.gold}`, color: COLOR.text }}>{initials(user.name) || "F"}</div>
+            <button onClick={() => avatarRef.current?.click()} className="relative h-24 w-24 rounded-full overflow-hidden flex items-center justify-center text-[24px] font-bold" style={{ background: COLOR.card2, border: `2px solid ${COLOR.gold}`, color: COLOR.text }}>
+              {user.avatar ? (
+                <img src={user.avatar} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Camera size={28} color={COLOR.gold} />
+              )}
+              <span className="absolute bottom-0 right-0 h-7 w-7 rounded-full flex items-center justify-center" style={{ background: COLOR.gold }}><Camera size={14} color={COLOR.bg} /></span>
+            </button>
+            <input ref={avatarRef} type="file" accept="image/*" hidden onChange={onAvatar} />
             <div className="mt-3 text-[18px] font-bold" style={{ color: COLOR.text }}>{user.name}</div>
             <div className="text-[12px]" style={{ color: COLOR.muted }}>{user.farmName} · {user.region}</div>
             <span className="mt-2 rounded-full px-3 py-1 text-[10px] font-semibold" style={{ background: COLOR.card2, color: COLOR.gold }}>{tier}</span>
@@ -1445,6 +1555,10 @@ export function Profile({ user, farm, score, onBack, onLogout, onGo }: { user: U
           <button onClick={() => { if (confirm("Clear all data?")) { Store.clearAll(); onLogout(); } }} className="w-full rounded-xl p-4 flex items-center gap-3" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
             <Trash2 size={18} color={COLOR.danger} />
             <span className="text-[14px]" style={{ color: COLOR.danger }}>Clear All Data</span>
+          </button>
+          <button onClick={() => { if (confirm("Log out of FishFarm OS?")) onLogout(); }} className="w-full rounded-xl p-4 flex items-center justify-center gap-2 mt-3" style={{ background: COLOR.gold, color: COLOR.bg }}>
+            <LogIn size={18} />
+            <span className="text-[14px] font-semibold">Log Out</span>
           </button>
         </div>
 

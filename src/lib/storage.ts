@@ -4,16 +4,19 @@ export type User = {
   farmName: string;
   region: string;
   language: string;
+  avatar?: string;
 };
+export type ExtraFish = { type: string; count: number };
 export type Farm = {
   pondCount: number;
   fishCount: number;
-  fishType: "Tilapia" | "Catfish" | "";
+  fishType: string;
   fishSize: "Fingerling" | "Medium" | "Almost Harvest" | "";
   stockDate: string;
   lat?: number;
   lon?: number;
   pondPhotoAnalysis?: string;
+  extraFish?: ExtraFish[];
 };
 export type FeedLog = { date: string; bags: number; notes?: string };
 export type ChatMessage = {
