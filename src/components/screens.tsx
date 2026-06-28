@@ -152,7 +152,15 @@ export function BottomNav({ current, onGo, notifCount }: { current: Screen; onGo
     { key: "profile", label: "Profile", Icon: SettingsIcon },
   ];
   return (
-    <nav className="sticky bottom-0 left-0 right-0 px-4 pt-3 pb-6" style={{ background: COLOR.bg, borderTop: `1px solid ${COLOR.div}` }}>
+    <nav
+      className="sticky bottom-0 left-0 right-0 px-4 pt-3 pb-6"
+      style={{
+        background: COLOR.card,
+        borderTop: `1px solid ${COLOR.div}`,
+        borderTopLeftRadius: 9,
+        borderTopRightRadius: 9,
+      }}
+    >
       <ul className="flex items-center justify-around">
         {items.map(({ key, label, Icon }) => {
           const active = current === key;
