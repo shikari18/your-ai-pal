@@ -373,7 +373,8 @@ export function Onboarding2({ onNext }: { onNext: () => void }) {
         )}
         {status && <div className="text-[12px]" style={{ color: COLOR.muted }}>{status}</div>}
 
-        <Btn onClick={onNext}>Next</Btn>
+        <Btn onClick={onNext} disabled={!farm.lat || !farm.lon}>Next</Btn>
+        {(!farm.lat || !farm.lon) && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>Please share or enter your location to continue</div>}
       </div>
     </Shell>
   );
