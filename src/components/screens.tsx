@@ -542,6 +542,7 @@ export function Dashboard({
           </div>
         </div>
 
+        {briefingOn && (
         <Card accent>
           <div className="flex items-center justify-between">
             <Eyebrow gold>AI Briefing</Eyebrow>
@@ -559,6 +560,7 @@ export function Dashboard({
             <div className="text-[10px]" style={{ color: COLOR.muted }}>{new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
           </div>
         </Card>
+        )}
 
         <div>
           <div className="text-[16px] font-bold mb-2" style={{ color: COLOR.text }}>At a Glance</div>
