@@ -529,6 +529,7 @@ export function Dashboard({
   const hr = new Date().getHours();
   const greet = greetingForHour(hr);
   const WeatherIcon = !weather ? Cloud : weather.current.icon === "rain" ? CloudRain : weather.current.icon === "cloud" ? Cloud : Sun;
+  const briefingOn = typeof window !== "undefined" ? (localStorage.getItem("ffo.dailyBriefing") ?? "true") === "true" : true;
   return (
     <>
       <MainHeader user={user} onGoNotif={() => onGo("notifications")} onGoProfile={() => onGo("profile")} notifCount={notifs.filter((n) => !n.read).length} />
