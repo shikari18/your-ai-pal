@@ -772,10 +772,19 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
       </div>
 
       <form
-        onSubmit={(e) => { e.preventDefault(); send(input); }}
+        onSubmit={(e) => { e.preventDefault(); send(input, pendingImage ?? undefined); }}
         className="px-3 pt-2 pb-5"
         style={{ background: COLOR.bg, borderTop: `1px solid ${COLOR.div}` }}
       >
+        {pendingImage && (
+          <div className="mb-2 flex items-start gap-2 rounded-xl p-2" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
+            <img src={pendingImage} alt="preview" className="h-16 w-16 rounded-lg object-cover" />
+            <div className="flex-1 text-[12px]" style={{ color: COLOR.muted }}>
+              Image attached. Add a message or tap send.
+            </div>
+            <button type="button" onClick={() => setPendingImage(null)} aria-label="Remove image" className="p-1"><X size={16} color={COLOR.muted} /></button>
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-full px-3 py-2" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
           <button
             type="button"
@@ -789,15 +798,15 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
           </button>
           <input
             value={input} onChange={(e) => setInput(e.target.value)}
-            placeholder={recording ? "Listening…" : "Type or speak to Ama..."}
+            placeholder={recording ? "Listening…" : pendingImage ? "Add a message (optional)" : "Type or speak to Ama..."}
             className="flex-1 bg-transparent text-[14px] outline-none"
             style={{ color: COLOR.text }}
           />
           <button type="button" onClick={() => fileRef.current?.click()} className="p-1" aria-label="Attach image">
-            <ImageIcon size={20} color={COLOR.muted} />
+            <ImageIcon size={20} color={pendingImage ? COLOR.gold : COLOR.muted} />
           </button>
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickImage} />
-          <button type="submit" disabled={loading || !input.trim()} aria-label="Send" className="h-9 w-9 rounded-full flex items-center justify-center disabled:opacity-50" style={{ background: COLOR.gold }}>
+          <button type="submit" disabled={loading || (!input.trim() && !pendingImage)} aria-label="Send" className="h-9 w-9 rounded-full flex items-center justify-center disabled:opacity-50" style={{ background: COLOR.gold }}>
             <Send size={16} color={COLOR.bg} />
           </button>
         </div>
