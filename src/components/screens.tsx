@@ -1491,11 +1491,12 @@ export function CreditScore({ user, farm, onBack }: { user: User; farm: Farm; on
 }
 
 // ---------- Profile / Settings ----------
-export function Profile({ user, farm, score, onBack, onLogout, onGo }: { user: User; farm: Farm; score: number; onBack: () => void; onLogout: () => void; onGo: (s: Screen) => void }) {
+export function Profile({ user, farm, score, onBack, onLogout, onGo, onUserUpdate }: { user: User; farm: Farm; score: number; onBack: () => void; onLogout: () => void; onGo: (s: Screen) => void; onUserUpdate?: (u: User) => void }) {
   const [twi, setTwi] = useState(() => typeof window !== "undefined" && localStorage.getItem("twiVoice") === "true");
   const [briefingOn, setBriefingOn] = useState(() => typeof window !== "undefined" && (localStorage.getItem("ffo.dailyBriefing") ?? "true") === "true");
   const [notifOn, setNotifOn] = useState(() => typeof window !== "undefined" && (localStorage.getItem("ffo.notifEnabled") ?? "true") === "true");
   const [keyOpen, setKeyOpen] = useState(false); const [keyVal, setKeyVal] = useState("");
+  const avatarRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { localStorage.setItem("twiVoice", String(twi)); }, [twi]);
   useEffect(() => { localStorage.setItem("ffo.dailyBriefing", String(briefingOn)); }, [briefingOn]);
@@ -1504,13 +1505,30 @@ export function Profile({ user, farm, score, onBack, onLogout, onGo }: { user: U
 
   const tier = score <= 40 ? "NEW FARMER" : score <= 70 ? "GROWING FARMER" : "TRUSTED FARMER";
 
+  async function onAvatar(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
+    const next = { ...user, avatar: dataUrl };
+    Store.setUser(next);
+    onUserUpdate?.(next);
+    e.target.value = "";
+  }
+
   return (
     <Shell>
       <TopBar onBack={onBack} title="Profile" />
       <div className="px-5 pb-10 space-y-4">
         <Card>
           <div className="flex flex-col items-center">
-            <div className="h-20 w-20 rounded-full flex items-center justify-center text-[24px] font-bold" style={{ background: COLOR.card2, border: `2px solid ${COLOR.gold}`, color: COLOR.text }}>{initials(user.name) || "F"}</div>
+            <button onClick={() => avatarRef.current?.click()} className="relative h-24 w-24 rounded-full overflow-hidden flex items-center justify-center text-[24px] font-bold" style={{ background: COLOR.card2, border: `2px solid ${COLOR.gold}`, color: COLOR.text }}>
+              {user.avatar ? (
+                <img src={user.avatar} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <Camera size={28} color={COLOR.gold} />
+              )}
+              <span className="absolute bottom-0 right-0 h-7 w-7 rounded-full flex items-center justify-center" style={{ background: COLOR.gold }}><Camera size={14} color={COLOR.bg} /></span>
+            </button>
+            <input ref={avatarRef} type="file" accept="image/*" hidden onChange={onAvatar} />
             <div className="mt-3 text-[18px] font-bold" style={{ color: COLOR.text }}>{user.name}</div>
             <div className="text-[12px]" style={{ color: COLOR.muted }}>{user.farmName} · {user.region}</div>
             <span className="mt-2 rounded-full px-3 py-1 text-[10px] font-semibold" style={{ background: COLOR.card2, color: COLOR.gold }}>{tier}</span>
@@ -1534,6 +1552,10 @@ export function Profile({ user, farm, score, onBack, onLogout, onGo }: { user: U
           <button onClick={() => { if (confirm("Clear all data?")) { Store.clearAll(); onLogout(); } }} className="w-full rounded-xl p-4 flex items-center gap-3" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
             <Trash2 size={18} color={COLOR.danger} />
             <span className="text-[14px]" style={{ color: COLOR.danger }}>Clear All Data</span>
+          </button>
+          <button onClick={() => { if (confirm("Log out of FishFarm OS?")) onLogout(); }} className="w-full rounded-xl p-4 flex items-center justify-center gap-2 mt-3" style={{ background: COLOR.gold, color: COLOR.bg }}>
+            <LogIn size={18} />
+            <span className="text-[14px] font-semibold">Log Out</span>
           </button>
         </div>
 
