@@ -642,18 +642,33 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
   async function send(text: string, image?: string) {
     const trimmed = text.trim();
     if (!trimmed && !image) return;
-    const userMsg: ChatMessage = { id: String(Date.now()), role: "user", content: trimmed || "(image)", image, ts: Date.now() };
+    const userMsg: ChatMessage = { id: String(Date.now()), role: "user", content: trimmed || (image ? "Please analyse this image" : ""), image, ts: Date.now() };
     const next = [...messages, userMsg];
-    setMessages(next); setInput(""); setLoading(true);
+    setMessages(next); setInput(""); setPendingImage(null); setLoading(true);
     try {
       const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region}`;
-      const { reply } = await ask({
-        data: {
-          messages: next.map((m) => ({ role: m.role, content: m.content })),
-          language: user.language,
-          farmContext: context,
-        },
-      });
+      let reply = "";
+      if (image) {
+        const { diagnosis } = await diag({ data: { imageBase64: image } });
+        reply = diagnosis;
+        if (trimmed) {
+          const { reply: extra } = await ask({
+            data: {
+              messages: [...next.map((m) => ({ role: m.role, content: m.content })), { role: "assistant", content: diagnosis }],
+              language: user.language, farmContext: context,
+            },
+          });
+          if (extra) reply = `${diagnosis}\n\n${extra}`;
+        }
+      } else {
+        const r = await ask({
+          data: {
+            messages: next.map((m) => ({ role: m.role, content: m.content })),
+            language: user.language, farmContext: context,
+          },
+        });
+        reply = r.reply;
+      }
       setMessages((m) => [...m, { id: String(Date.now() + 1), role: "assistant", content: reply || "…", ts: Date.now() }]);
       if (user.language === "Twi") speak(reply);
     } catch {
@@ -673,7 +688,8 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
   async function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
-    send("Please analyse this", dataUrl);
+    setPendingImage(dataUrl);
+    e.target.value = "";
   }
 
   function onVoiceTurn(userText: string, amaText: string) {
