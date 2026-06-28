@@ -142,6 +142,7 @@ function App() {
         user={user} farm={farm} score={score}
         onBack={() => setScreen("dashboard")}
         onGo={setScreen}
+        onUserUpdate={setUser}
         onLogout={() => { setUser(null); setScreen("splash"); }}
       />
     );
