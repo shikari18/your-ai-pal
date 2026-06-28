@@ -628,6 +628,7 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
     return [{ id: "1", role: "assistant", ts: Date.now(), content: `Hi ${firstName(user.name)}, I'm Ama. How can I help with your fish today?` }];
   });
   const [input, setInput] = useState("");
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceCall, setVoiceCall] = useState(false);
