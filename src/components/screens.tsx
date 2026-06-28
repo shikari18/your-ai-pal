@@ -510,8 +510,8 @@ function MainHeader({ user, onGoNotif, onGoProfile, notifCount }: { user: User; 
           <Bell size={22} color={COLOR.text} strokeWidth={1.75} />
           {notifCount > 0 && <span className="absolute top-0 right-0 h-2 w-2 rounded-full" style={{ background: COLOR.danger }} />}
         </button>
-        <button onClick={onGoProfile} className="h-10 w-10 rounded-full flex items-center justify-center text-[13px] font-bold" style={{ background: COLOR.card, border: `1.5px solid ${COLOR.gold}`, color: COLOR.text }}>
-          {initials(user.name) || "F"}
+        <button onClick={onGoProfile} className="h-10 w-10 rounded-full overflow-hidden flex items-center justify-center text-[13px] font-bold" style={{ background: COLOR.card, border: `1.5px solid ${COLOR.gold}`, color: COLOR.text }}>
+          {user.avatar ? <img src={user.avatar} alt="" className="h-full w-full object-cover" /> : (initials(user.name) || "F")}
         </button>
       </div>
     </div>
