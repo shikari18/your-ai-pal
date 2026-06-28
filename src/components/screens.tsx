@@ -622,6 +622,7 @@ function Quick({ Icon, title, sub, onClick }: { Icon: typeof Fish; title: string
 // ---------- Chat ----------
 export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: () => void }) {
   const ask = useServerFn(askAma);
+  const diag = useServerFn(analyzeFishImage);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const h = Store.getChat();
     if (h.length) return h;
