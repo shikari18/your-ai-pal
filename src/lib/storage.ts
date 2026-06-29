@@ -19,6 +19,16 @@ export type Farm = {
   extraFish?: ExtraFish[];
 };
 export type FeedLog = { date: string; bags: number; notes?: string };
+export type PondLog = {
+  id: string;
+  date: string;
+  waterColor: "clear" | "green" | "brown" | "murky" | "";
+  phLevel: string;
+  temp: string;
+  fishBehavior: "normal" | "surfacing" | "sluggish" | "feeding-well" | "";
+  notes: string;
+  photo?: string;
+};
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -26,7 +36,21 @@ export type ChatMessage = {
   image?: string;
   ts: number;
 };
-export type Notif = { id: string; title: string; body: string; ts: number; read?: boolean; kind: "weather" | "feed" | "harvest" | "system" };
+export type Notif = { id: string; title: string; body: string; ts: number; read?: boolean; kind: "weather" | "feed" | "harvest" | "system" | "ai" };
+
+export type FishListing = {
+  id: string;
+  sellerName: string;
+  sellerPhone: string;
+  region: string;
+  fishType: string;
+  quantity: number;
+  pricePerKg: number;
+  description: string;
+  image?: string;
+  ts: number;
+  isBuying: boolean; // true = buyer looking to buy, false = seller listing fish
+};
 
 const K = {
   user: "ffo.user",
@@ -34,6 +58,7 @@ const K = {
   feed: "ffo.feedLogs",
   chat: "ffo.chat",
   notif: "ffo.notif",
+  listings: "ffo.listings",
   twi: "twiVoice",
   khaya: "khayaApiKey",
   dailyBriefing: "ffo.dailyBriefing",
@@ -65,10 +90,14 @@ export const Store = {
   setFarm: (f: Farm) => write(K.farm, f),
   getFeed: (): FeedLog[] => read<FeedLog[]>(K.feed, []),
   setFeed: (l: FeedLog[]) => write(K.feed, l),
+  getPondLogs: (): PondLog[] => read<PondLog[]>("ffo.pondLogs", []),
+  setPondLogs: (l: PondLog[]) => write("ffo.pondLogs", l),
   getChat: (): ChatMessage[] => read<ChatMessage[]>(K.chat, []),
   setChat: (m: ChatMessage[]) => write(K.chat, m),
   getNotifs: (): Notif[] => read<Notif[]>(K.notif, []),
   setNotifs: (n: Notif[]) => write(K.notif, n),
+  getListings: (): FishListing[] => read<FishListing[]>(K.listings, []),
+  setListings: (l: FishListing[]) => write(K.listings, l),
   clearAll: () => {
     Object.values(K).forEach((k) => window.localStorage.removeItem(k));
   },

@@ -1,3 +1,47 @@
+// Gemini TTS key is read from the environment (set VITE_GEMINI_TTS_KEY in your .env or Render env vars)
+// Vite exposes VITE_* vars to the client at build time
+const GEMINI_TTS_KEY = typeof import.meta !== "undefined"
+  ? (import.meta as { env?: { VITE_GEMINI_TTS_KEY?: string } }).env?.VITE_GEMINI_TTS_KEY ?? ""
+  : "";
+
+export async function speakGemini(text: string): Promise<void> {
+  try {
+    // Gemini Live TTS via REST (text-to-speech synthesis)
+    const res = await fetch(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${GEMINI_TTS_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: { text },
+          voice: {
+            languageCode: "en-GH",
+            name: "en-GB-Journey-F",
+            ssmlGender: "FEMALE",
+          },
+          audioConfig: {
+            audioEncoding: "MP3",
+            speakingRate: 0.95,
+            pitch: 0,
+          },
+        }),
+      }
+    );
+    if (!res.ok) throw new Error(`TTS ${res.status}`);
+    const j = (await res.json()) as { audioContent?: string };
+    if (!j.audioContent) throw new Error("No audio content");
+    const audio = new Audio(`data:audio/mp3;base64,${j.audioContent}`);
+    return new Promise((resolve) => {
+      audio.onended = () => resolve();
+      audio.onerror = () => { speakEnglish(text); resolve(); };
+      audio.play().catch(() => { speakEnglish(text); resolve(); });
+    });
+  } catch {
+    // fallback to browser TTS
+    return speakEnglishAsync(text);
+  }
+}
+
 export function speakEnglish(text: string) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   const u = new SpeechSynthesisUtterance(text);
@@ -8,10 +52,24 @@ export function speakEnglish(text: string) {
   window.speechSynthesis.speak(u);
 }
 
+export function speakEnglishAsync(text: string): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) { resolve(); return; }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "en-GH";
+    u.rate = 0.92;
+    u.pitch = 1;
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  });
+}
+
 export async function speakTwi(text: string) {
   const key = typeof window !== "undefined" ? localStorage.getItem("khayaApiKey") : null;
   if (!key) {
-    speakEnglish(text);
+    await speakGemini(text);
     return;
   }
   try {
@@ -25,14 +83,14 @@ export async function speakTwi(text: string) {
     const audio = new Audio(URL.createObjectURL(blob));
     await audio.play();
   } catch {
-    speakEnglish(text);
+    await speakGemini(text);
   }
 }
 
 export function speak(text: string) {
   const twi = typeof window !== "undefined" && localStorage.getItem("twiVoice") === "true";
   if (twi) void speakTwi(text);
-  else speakEnglish(text);
+  else void speakGemini(text);
 }
 
 export async function recordAndTranscribe(): Promise<{ stop: () => Promise<string> }> {

@@ -4,15 +4,15 @@ import {
   ArrowLeft, Bell, MapPin, ChevronRight, Upload, Camera, Mic, Send, Image as ImageIcon,
   Calculator, Stethoscope, BarChart2, ShoppingBag, Tag, Cloud, CloudRain, Sun,
   Volume2, Layers, Fish, TrendingUp, TrendingDown, Minus, Plus, CheckCircle2,
-  Trash2, ChevronLeft, Loader2, X, Settings as SettingsIcon, MessageCircle, Home as HomeIcon,
-  LogIn, Phone, PhoneOff, Radio,
+  Trash2, Loader2, X, Settings as SettingsIcon, MessageCircle, Home as HomeIcon,
+  LogIn, Phone, PhoneOff, Radio, Store as StoreIcon, PlusCircle,
 } from "lucide-react";
 import {
-  Store, type User, type Farm, type ChatMessage, type FeedLog, type Notif,
+  Store, type User, type Farm, type ChatMessage, type FeedLog, type Notif, type FishListing,
   greetingForHour, fmtGHS, fmtDate, initials, firstName, daysBetween,
 } from "@/lib/storage";
 import { fetchWeather, type WeatherSnapshot } from "@/lib/weather";
-import { speak, recordAndTranscribe } from "@/lib/voice";
+import { speak, speakGemini, recordAndTranscribe } from "@/lib/voice";
 import {
   askAma, analyzePondImage, analyzeFishImage, generateBriefing,
   generateMarketPrices, generateWeatherAlerts, generateBuyers,
@@ -26,8 +26,8 @@ const COLOR = {
 
 export type Screen =
   | "splash" | "register" | "onboarding-1" | "onboarding-2" | "onboarding-3"
-  | "dashboard" | "chat" | "feed-calc" | "fish-doctor" | "weather"
-  | "market" | "sell" | "credit-score" | "profile" | "notifications";
+  | "dashboard" | "chat" | "feed-calc" | "pond-journal" | "weather"
+  | "market" | "sell" | "credit-score" | "profile" | "notifications" | "marketplace";
 
 const LANGS = ["English", "Twi", "Ga", "Ewe", "Hausa"] as const;
 const REGIONS = [
@@ -130,16 +130,13 @@ function Progress({ step, total = 3 }: { step: number; total?: number }) {
 
 function Logo({ size = 64 }: { size?: number }) {
   return (
-    <div
-      className="flex items-center justify-center rounded-full"
-      style={{ width: size, height: size, border: `1.5px solid ${COLOR.gold}` }}
-    >
-      <svg width={size * 0.55} height={size * 0.55} viewBox="0 0 24 24" fill="none" stroke={COLOR.gold} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M2 12c2-4 6-6 10-6s7 2 9 5c-2 3-5 5-9 5s-8-2-10-4z" />
-        <path d="M21 8l-3 4 3 4" />
-        <circle cx="8" cy="11" r="0.7" fill={COLOR.gold} />
-      </svg>
-    </div>
+    <img
+      src="/logo.png"
+      alt="FishFarm OS"
+      width={size}
+      height={size}
+      style={{ borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${COLOR.gold}` }}
+    />
   );
 }
 
@@ -277,7 +274,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: string) => void; onSkip?: () => void }) {
   const analyze = useServerFn(analyzePondImage);
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<string | null>(() => Store.getFarm().pondPhotoAnalysis ?? null);
+  const [uploaded, setUploaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -288,11 +285,12 @@ export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: 
       const dataUrl = await new Promise<string>((res, rej) => {
         const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f);
       });
+      // Silently analyse and save — don't show the result during onboarding
       const { analysis } = await analyze({ data: { imageBase64: dataUrl } });
-      setAnalysis(analysis);
       const farm = Store.getFarm(); Store.setFarm({ ...farm, pondPhotoAnalysis: analysis });
+      setUploaded(true);
     } catch {
-      setErr("Ama is resting, please try again.");
+      setErr("Could not analyse photo, please try again.");
     } finally { setLoading(false); }
   }
 
@@ -300,25 +298,34 @@ export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: 
     <Shell>
       <Progress step={1} total={3} />
       <div className="px-6 pt-5 pb-8 space-y-5">
-        <AmaBubble>Hi {firstName(user.name)}! I am Ama, your personal fish farming assistant. Before we begin, let me see your pond. Upload a photo and I will analyse it for you.</AmaBubble>
+        <AmaBubble>Hi {firstName(user.name)}! I'm Ama, your personal farming companion. Let me take a quick look at your pond — upload a photo and I'll have a full report waiting for you once you're set up.</AmaBubble>
 
-        <button onClick={() => fileRef.current?.click()} className="block w-full rounded-xl py-10 px-4 text-center" style={{ background: COLOR.card, border: `1.5px dashed ${COLOR.goldSoft}` }}>
+        <button onClick={() => fileRef.current?.click()} className="block w-full rounded-xl py-10 px-4 text-center" style={{ background: COLOR.card, border: `1.5px dashed ${uploaded ? COLOR.gold : COLOR.goldSoft}` }}>
           {loading ? (
-            <div className="flex flex-col items-center gap-2"><Spinner size={28} /><div className="text-[12px]" style={{ color: COLOR.muted }}>Ama is looking…</div></div>
+            <div className="flex flex-col items-center gap-2"><Spinner size={28} /><div className="text-[12px]" style={{ color: COLOR.muted }}>Got it, analysing…</div></div>
+          ) : uploaded ? (
+            <div className="flex flex-col items-center gap-2">
+              <CheckCircle2 size={28} color={COLOR.gold} />
+              <div className="text-[13px] font-semibold" style={{ color: COLOR.gold }}>Pond photo saved!</div>
+              <div className="text-[11px]" style={{ color: COLOR.muted }}>Tap to replace</div>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Upload size={28} color={COLOR.gold} />
-              <div className="text-[13px]" style={{ color: COLOR.muted }}>{analysis ? "Replace pond photo" : "Tap to upload pond photo"}</div>
+              <div className="text-[13px]" style={{ color: COLOR.muted }}>Tap to upload pond photo</div>
             </div>
           )}
         </button>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onFile} />
 
-        {analysis && <AmaBubble>{analysis}</AmaBubble>}
         {err && <div className="text-[12px]" style={{ color: COLOR.danger }}>{err}</div>}
 
-        <Btn onClick={() => onNext(analysis ?? undefined)} disabled={!analysis}>Next</Btn>
-        {!analysis && <div className="text-center text-[11px]" style={{ color: COLOR.muted }}>Please upload a pond photo to continue</div>}
+        <Btn onClick={() => onNext(Store.getFarm().pondPhotoAnalysis ?? undefined)} disabled={!uploaded && !Store.getFarm().pondPhotoAnalysis}>Next</Btn>
+        {!uploaded && !Store.getFarm().pondPhotoAnalysis && (
+          <div className="text-center">
+            <button onClick={() => onNext(undefined)} className="text-[12px]" style={{ color: COLOR.muted }}>Skip for now</button>
+          </div>
+        )}
       </div>
     </Shell>
   );
@@ -546,8 +553,8 @@ export function Dashboard({
         <Card accent>
           <div className="flex items-center justify-between">
             <Eyebrow gold>AI Briefing</Eyebrow>
-            <div className="h-6 w-6 rounded-full flex items-center justify-center" style={{ border: `1px solid ${COLOR.goldSoft}` }}>
-              <Fish size={12} color={COLOR.gold} />
+            <div className="h-6 w-6 rounded-full overflow-hidden" style={{ border: `1px solid ${COLOR.goldSoft}` }}>
+              <img src="/logo.png" alt="" className="h-full w-full object-cover" />
             </div>
           </div>
           <div className="mt-3 text-[15px] leading-relaxed min-h-[60px]" style={{ color: COLOR.text }}>
@@ -575,11 +582,11 @@ export function Dashboard({
           <div className="text-[16px] font-bold mb-2" style={{ color: COLOR.text }}>Quick Actions</div>
           <div className="grid grid-cols-2 gap-2.5">
             <Quick Icon={Calculator} title="Feed Calculator" sub="Calculate optimal feed" onClick={() => onGo("feed-calc")} />
-            <Quick Icon={Stethoscope} title="Fish Doctor" sub="Check fish health" onClick={() => onGo("fish-doctor")} />
+            <Quick Icon={Stethoscope} title="Pond Journal" sub="Log daily pond conditions" onClick={() => onGo("pond-journal")} />
             <Quick Icon={Bell} title="Pond Alerts" sub="View all alerts" onClick={() => onGo("weather")} />
             <Quick Icon={BarChart2} title="Market Prices" sub="Check fish prices" onClick={() => onGo("market")} />
             <Quick Icon={ShoppingBag} title="Buy Supplies" sub="Find quality supplies" onClick={() => onGo("market")} />
-            <Quick Icon={Tag} title="Sell Fish" sub="List your fish" onClick={() => onGo("sell")} />
+            <Quick Icon={Tag} title="Sell Fish / Buy Fish" sub="Marketplace" onClick={() => onGo("marketplace")} />
           </div>
         </div>
 
@@ -623,13 +630,16 @@ function Quick({ Icon, title, sub, onClick }: { Icon: typeof Fish; title: string
 }
 
 // ---------- Chat ----------
-export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: () => void }) {
+export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: User; farm: Farm; onBack: () => void; onFarmUpdate?: (f: Farm) => void }) {
   const ask = useServerFn(askAma);
   const diag = useServerFn(analyzeFishImage);
+  const [farm, setFarm] = useState(initialFarm);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const h = Store.getChat();
     if (h.length) return h;
-    return [{ id: "1", role: "assistant", ts: Date.now(), content: `Hi ${firstName(user.name)}, I'm Ama. How can I help with your fish today?` }];
+    const hour = new Date().getHours();
+    const timeGreet = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+    return [{ id: "1", role: "assistant", ts: Date.now(), content: `Hey ${firstName(user.name)}! Good ${timeGreet} 😊 I'm Ama. How are you and your fish doing today?` }];
   });
   const [input, setInput] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
@@ -643,6 +653,28 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
   useEffect(() => { Store.setChat(messages); }, [messages]);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [messages, loading]);
 
+  // Parse [[ACTION:{...}]] blocks from AI reply and apply them
+  function applyFarmActions(reply: string, currentFarm: Farm): { clean: string; updated: Farm } {
+    let updated = { ...currentFarm };
+    let changed = false;
+    const clean = reply.replace(/\[\[ACTION:([\s\S]*?)\]\]/g, (_, json) => {
+      try {
+        const action = JSON.parse(json) as { type: string; data: Partial<Farm> };
+        if (action.type === "update_farm" && action.data) {
+          updated = { ...updated, ...action.data };
+          changed = true;
+        }
+      } catch {}
+      return "";
+    }).trim();
+    if (changed) {
+      Store.setFarm(updated);
+      setFarm(updated);
+      onFarmUpdate?.(updated);
+    }
+    return { clean, updated };
+  }
+
   async function send(text: string, image?: string) {
     const trimmed = text.trim();
     if (!trimmed && !image) return;
@@ -650,19 +682,22 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
     const next = [...messages, userMsg];
     setMessages(next); setInput(""); setPendingImage(null); setLoading(true);
     try {
-      const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region}`;
+      const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region} stockDate=${farm.stockDate}`;
       let reply = "";
       if (image) {
         const { diagnosis } = await diag({ data: { imageBase64: image } });
         reply = diagnosis;
         if (trimmed) {
-          const { reply: extra } = await ask({
+          const r2 = await ask({
             data: {
               messages: [...next.map((m) => ({ role: m.role, content: m.content })), { role: "assistant", content: diagnosis }],
               language: user.language, farmContext: context,
             },
           });
-          if (extra) reply = `${diagnosis}\n\n${extra}`;
+          if (r2.reply) {
+            applyFarmActions(r2.reply, farm);
+            reply = `${diagnosis}\n\n${r2.displayReply || r2.reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim()}`;
+          }
         }
       } else {
         const r = await ask({
@@ -672,11 +707,18 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
           },
         });
         reply = r.reply;
+        // Use clean display version for the bubble
+        const displayText = r.displayReply || r.reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim();
+        applyFarmActions(r.reply || "", farm);
+        setMessages((m) => [...m, { id: String(Date.now() + 1), role: "assistant", content: displayText || "…", ts: Date.now() }]);
+        if (user.language === "Twi") speak(displayText);
+        return; // already set message above
       }
-      setMessages((m) => [...m, { id: String(Date.now() + 1), role: "assistant", content: reply || "…", ts: Date.now() }]);
-      if (user.language === "Twi") speak(reply);
+      const { clean } = applyFarmActions(reply || "…", farm);
+      setMessages((m) => [...m, { id: String(Date.now() + 1), role: "assistant", content: clean || "…", ts: Date.now() }]);
+      if (user.language === "Twi") speak(clean);
     } catch {
-      setMessages((m) => [...m, { id: String(Date.now() + 2), role: "assistant", content: "Ama is resting, please try again.", ts: Date.now() }]);
+      setMessages((m) => [...m, { id: String(Date.now() + 2), role: "assistant", content: "I'm having a little trouble right now, please try again.", ts: Date.now() }]);
     } finally { setLoading(false); }
   }
 
@@ -702,9 +744,10 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
       { id: String(Date.now()), role: "user", content: userText, ts: Date.now() },
       { id: String(Date.now() + 1), role: "assistant", content: amaText, ts: Date.now() + 1 },
     ]);
+    applyFarmActions(amaText, farm);
   }
 
-  const suggestions = ["Water quality tips", "Signs of disease", "Market prices", "Weather update"];
+  const suggestions = ["How are things going?", "Water quality tips", "Any disease signs?", "Market prices today"];
 
   return (
     <div className="flex h-screen flex-col" style={{ background: COLOR.bg }}>
@@ -712,7 +755,7 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
         <button onClick={onBack} className="p-1 -ml-1"><ArrowLeft size={22} color={COLOR.text} /></button>
         <div className="text-center">
           <div className="text-[16px] font-bold" style={{ color: COLOR.text }}>Ama</div>
-          <div className="text-[11px]" style={{ color: COLOR.muted }}>AI Fish Expert</div>
+          <div className="text-[11px]" style={{ color: COLOR.muted }}>Your AI Companion</div>
         </div>
         <button
           onClick={() => setVoiceCall(true)}
@@ -729,8 +772,8 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
         {messages.map((m) => (
           <div key={m.id} className={m.role === "user" ? "flex justify-end" : "flex gap-2"}>
             {m.role === "assistant" && (
-              <div className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center" style={{ border: `1px solid ${COLOR.gold}` }}>
-                <Fish size={14} color={COLOR.gold} />
+              <div className="h-8 w-8 shrink-0 rounded-full overflow-hidden" style={{ border: `1px solid ${COLOR.gold}` }}>
+                <img src="/logo.png" alt="Ama" className="h-full w-full object-cover" />
               </div>
             )}
             <div className="max-w-[78%]">
@@ -756,7 +799,7 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
         ))}
         {loading && (
           <div className="flex gap-2">
-            <div className="h-8 w-8 rounded-full flex items-center justify-center" style={{ border: `1px solid ${COLOR.gold}` }}><Fish size={14} color={COLOR.gold} /></div>
+            <div className="h-8 w-8 rounded-full overflow-hidden" style={{ border: `1px solid ${COLOR.gold}` }}><img src="/logo.png" alt="Ama" className="h-full w-full object-cover" /></div>
             <div className="rounded-2xl px-4 py-3 flex gap-1.5" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
               <span className="ama-dot h-1.5 w-1.5 rounded-full" style={{ background: COLOR.gold }} />
               <span className="ama-dot h-1.5 w-1.5 rounded-full" style={{ background: COLOR.gold, animationDelay: "0.2s" }} />
@@ -801,7 +844,7 @@ export function Chat({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
           </button>
           <input
             value={input} onChange={(e) => setInput(e.target.value)}
-            placeholder={recording ? "Listening…" : pendingImage ? "Add a message (optional)" : "Type or speak to Ama..."}
+            placeholder={recording ? "Listening…" : pendingImage ? "Add a message (optional)" : "Talk to Ama..."}
             className="flex-1 bg-transparent text-[14px] outline-none"
             style={{ color: COLOR.text }}
           />
@@ -859,11 +902,11 @@ function VoiceCall({
         setStatus("thinking");
         historyRef.current.push({ role: "user", content: text });
         const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region}`;
-        const { reply } = await ask({
+        const r = await ask({
           data: { messages: historyRef.current.slice(-12), language: user.language, farmContext: context },
         });
         if (!activeRef.current) return;
-        const clean = (reply || "").trim() || "I didn't catch that, please repeat.";
+        const clean = (r.displayReply || r.reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim() || "I didn't catch that, please repeat.");
         historyRef.current.push({ role: "assistant", content: clean });
         setLastAma(clean);
         onTurn(text, clean);
@@ -1035,17 +1078,7 @@ async function listenUntilSilence(
 }
 
 function speakAsync(text: string, _twi: boolean): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) { resolve(); return; }
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-GH";
-    u.rate = 0.95;
-    u.pitch = 1;
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(u);
-  });
+  return speakGemini(text);
 }
 
 
@@ -1122,80 +1155,180 @@ export function FeedCalc({ farm: initialFarm, onBack }: { farm: Farm; onBack: ()
   );
 }
 
-// ---------- Fish Doctor ----------
-export function FishDoctor({ onBack }: { onBack: () => void }) {
-  const diag = useServerFn(analyzeFishImage);
-  const ask = useServerFn(askAma);
-  const [loading, setLoading] = useState(false);
-  const [text, setText] = useState<string | null>(null);
-  const [recording, setRecording] = useState(false);
-  const recRef = useRef<{ stop: () => Promise<string> } | null>(null);
+// ---------- Pond Journal ----------
+export function PondJournal({ farm: initialFarm, onBack }: { farm: Farm; onBack: () => void }) {
+  const [logs, setLogs] = useState<import("@/lib/storage").PondLog[]>(() => Store.getPondLogs());
+  const [view, setView] = useState<"log" | "history">("log");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+  // Form state
+  const today = new Date().toISOString().slice(0, 10);
+  const [waterColor, setWaterColor] = useState<import("@/lib/storage").PondLog["waterColor"]>("");
+  const [phLevel, setPhLevel] = useState("");
+  const [temp, setTemp] = useState("");
+  const [fishBehavior, setFishBehavior] = useState<import("@/lib/storage").PondLog["fishBehavior"]>("");
+  const [notes, setNotes] = useState("");
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function onPickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
     const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
-    setLoading(true); setText(null);
-    try { const { diagnosis } = await diag({ data: { imageBase64: dataUrl } }); setText(diagnosis); }
-    catch { setText("Ama is resting, please try again."); }
-    finally { setLoading(false); }
+    setPhoto(dataUrl); e.target.value = "";
   }
 
-  async function recStart() { try { recRef.current = await recordAndTranscribe(); setRecording(true); } catch {} }
-  async function recStop() {
-    if (!recRef.current) return;
-    setRecording(false);
-    try {
-      const t = await recRef.current.stop();
-      if (t) {
-        setLoading(true);
-        const { reply } = await ask({ data: { messages: [{ role: "user", content: `Symptoms described: ${t}. Identify likely disease, 3 visible symptoms, local treatment first then medicine, urgency LOW/MEDIUM/HIGH. Format with labels DISEASE/SYMPTOMS/TREATMENT/URGENCY.` }] } });
-        setText(reply);
-      }
-    } catch {} finally { setLoading(false); recRef.current = null; }
+  function saveLog() {
+    const entry: import("@/lib/storage").PondLog = {
+      id: String(Date.now()), date: today,
+      waterColor, phLevel, temp, fishBehavior, notes,
+      photo: photo ?? undefined,
+    };
+    const next = [entry, ...logs];
+    Store.setPondLogs(next); setLogs(next); setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+    // reset
+    setWaterColor(""); setPhLevel(""); setTemp(""); setFishBehavior(""); setNotes(""); setPhoto(null);
   }
 
-  const parsed = text ? parseDiagnosis(text) : null;
+  const waterColors: { v: import("@/lib/storage").PondLog["waterColor"]; label: string; dot: string }[] = [
+    { v: "clear", label: "Clear", dot: "#A0D8EF" },
+    { v: "green", label: "Green", dot: "#6BCB77" },
+    { v: "brown", label: "Brown", dot: "#A0724A" },
+    { v: "murky", label: "Murky", dot: "#8A7A60" },
+  ];
+  const behaviors: { v: import("@/lib/storage").PondLog["fishBehavior"]; label: string }[] = [
+    { v: "normal", label: "Normal" },
+    { v: "feeding-well", label: "Feeding well" },
+    { v: "surfacing", label: "Surfacing" },
+    { v: "sluggish", label: "Sluggish" },
+  ];
+
+  const canSave = waterColor || fishBehavior || notes.trim() || phLevel || temp;
 
   return (
     <Shell>
-      <TopBar onBack={onBack} title="Fish Doctor" />
+      <TopBar onBack={onBack} title="Pond Journal" />
       <div className="px-5 pb-8 space-y-4">
-        <AmaBubble>Upload a photo of your fish or pond. I will diagnose the problem instantly.</AmaBubble>
+        {/* Tab */}
+        <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${COLOR.div}` }}>
+          {(["log", "history"] as const).map((t) => (
+            <button key={t} onClick={() => setView(t)} className="flex-1 py-2.5 text-[13px] font-semibold"
+              style={{ background: view === t ? COLOR.gold : COLOR.card, color: view === t ? COLOR.bg : COLOR.muted }}>
+              {t === "log" ? "Log Today" : `History (${logs.length})`}
+            </button>
+          ))}
+        </div>
 
-        <button onClick={() => fileRef.current?.click()} className="w-full rounded-xl py-8 px-4 flex flex-col items-center gap-2" style={{ background: COLOR.card, border: `1.5px dashed ${COLOR.goldSoft}` }}>
-          <Camera size={28} color={COLOR.gold} />
-          <div className="text-[13px] font-semibold" style={{ color: COLOR.gold }}>Take Photo</div>
-          <div className="text-[12px]" style={{ color: COLOR.muted }}>Upload from Gallery</div>
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onFile} />
+        {view === "log" && (
+          <>
+            <AmaBubble>Log your pond conditions daily — it helps me spot patterns and give you better advice!</AmaBubble>
 
-        <div className="text-center text-[12px]" style={{ color: COLOR.muted }}>or describe symptoms</div>
+            {/* Water color */}
+            <Card>
+              <Eyebrow gold>Water colour</Eyebrow>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                {waterColors.map(({ v, label, dot }) => (
+                  <button key={v} onClick={() => setWaterColor(waterColor === v ? "" : v)}
+                    className="flex items-center gap-1.5 px-3 h-8 rounded-full text-[12px]"
+                    style={{ border: `1px solid ${waterColor === v ? COLOR.gold : COLOR.div}`, color: waterColor === v ? COLOR.gold : COLOR.muted }}>
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: dot }} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Card>
 
-        <button
-          onPointerDown={(e) => { e.preventDefault(); recStart(); }}
-          onPointerUp={(e) => { e.preventDefault(); recStop(); }}
-          onPointerLeave={() => { if (recording) recStop(); }}
-          className="w-full rounded-xl p-4 flex items-center gap-3"
-          style={{ background: COLOR.card, border: `1px solid ${recording ? COLOR.danger : COLOR.div}` }}
-        >
-          <Mic size={20} color={recording ? COLOR.danger : COLOR.gold} />
-          <div className="text-[13px]" style={{ color: COLOR.muted }}>{recording ? "Listening… release to stop" : "Hold to describe what you see"}</div>
-        </button>
+            {/* Fish behaviour */}
+            <Card>
+              <Eyebrow gold>Fish behaviour</Eyebrow>
+              <div className="mt-3 flex gap-2 flex-wrap">
+                {behaviors.map(({ v, label }) => (
+                  <button key={v} onClick={() => setFishBehavior(fishBehavior === v ? "" : v)}
+                    className="px-3 h-8 rounded-full text-[12px]"
+                    style={{ border: `1px solid ${fishBehavior === v ? COLOR.gold : COLOR.div}`, color: fishBehavior === v ? COLOR.gold : COLOR.muted }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </Card>
 
-        {loading && <div className="flex justify-center"><Spinner /></div>}
+            {/* pH & Temp */}
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="pH Level (optional)">
+                <input inputMode="decimal" value={phLevel} onChange={(e) => setPhLevel(e.target.value)}
+                  placeholder="e.g. 7.2" className="w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text }} />
+              </Field>
+              <Field label="Water Temp °C">
+                <input inputMode="decimal" value={temp} onChange={(e) => setTemp(e.target.value)}
+                  placeholder="e.g. 28" className="w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text }} />
+              </Field>
+            </div>
 
-        {parsed && (
-          <Card accent>
-            <Eyebrow gold>Diagnosis Result</Eyebrow>
-            <div className="mt-2 text-[20px] font-bold" style={{ color: COLOR.text }}>{parsed.disease || "Diagnosis"}</div>
-            <div className="mt-2"><UrgencyBadge level={parsed.urgency} /></div>
-            <div className="my-3 h-px" style={{ background: COLOR.div }} />
-            {parsed.symptoms && <Section label="Symptoms detected" body={parsed.symptoms} />}
-            {parsed.treatment && <Section label="Recommended treatment" body={parsed.treatment} />}
-            {parsed.feeding && <Section label="Feeding adjustment" body={parsed.feeding} />}
-            <div className="mt-4"><Btn>Find Nearby Supplier</Btn></div>
-          </Card>
+            {/* Notes */}
+            <div className="rounded-xl px-4 py-3" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
+              <Eyebrow>Notes</Eyebrow>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)}
+                placeholder="Any observations — dead fish, unusual smell, feed leftovers…"
+                rows={3} className="mt-2 w-full bg-transparent outline-none text-[14px] resize-none"
+                style={{ color: COLOR.text }} />
+            </div>
+
+            {/* Photo */}
+            <button onClick={() => fileRef.current?.click()} className="w-full rounded-xl overflow-hidden"
+              style={{ border: `1.5px dashed ${photo ? COLOR.gold : COLOR.goldSoft}` }}>
+              {photo ? (
+                <div className="relative">
+                  <img src={photo} alt="pond" className="w-full h-36 object-cover" />
+                  <div className="absolute top-2 right-2 rounded-full p-1.5" style={{ background: "rgba(0,0,0,0.6)" }}>
+                    <Camera size={14} color={COLOR.gold} />
+                  </div>
+                </div>
+              ) : (
+                <div className="py-5 flex flex-col items-center gap-1">
+                  <Camera size={22} color={COLOR.goldSoft} />
+                  <div className="text-[12px]" style={{ color: COLOR.muted }}>Add pond photo (optional)</div>
+                </div>
+              )}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onPickPhoto} />
+
+            {saved && (
+              <div className="flex items-center gap-2 rounded-xl p-3" style={{ background: "#1A4A1A", border: `1px solid ${COLOR.ok}` }}>
+                <CheckCircle2 size={18} color={COLOR.ok} />
+                <span className="text-[13px]" style={{ color: COLOR.ok }}>Log saved for today!</span>
+              </div>
+            )}
+
+            <Btn variant="solid" onClick={saveLog} disabled={!canSave}>Save Today's Log</Btn>
+          </>
+        )}
+
+        {view === "history" && (
+          <>
+            {logs.length === 0 ? (
+              <Card><div className="text-[13px] text-center py-4" style={{ color: COLOR.muted }}>No logs yet. Start logging today to track your pond over time.</div></Card>
+            ) : (
+              <div className="space-y-3">
+                {logs.map((l) => (
+                  <Card key={l.id}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1">
+                        <div className="text-[13px] font-bold" style={{ color: COLOR.text }}>{new Date(l.date).toLocaleDateString("en-GH", { weekday: "short", day: "numeric", month: "short" })}</div>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {l.waterColor && <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: COLOR.card2, color: COLOR.text }}>💧 {l.waterColor}</span>}
+                          {l.fishBehavior && <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: COLOR.card2, color: COLOR.text }}>🐟 {l.fishBehavior}</span>}
+                          {l.phLevel && <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: COLOR.card2, color: COLOR.text }}>pH {l.phLevel}</span>}
+                          {l.temp && <span className="rounded-full px-2 py-0.5 text-[10px]" style={{ background: COLOR.card2, color: COLOR.text }}>{l.temp}°C</span>}
+                        </div>
+                        {l.notes && <div className="mt-1.5 text-[12px]" style={{ color: COLOR.muted }}>{l.notes}</div>}
+                      </div>
+                      {l.photo && <img src={l.photo} alt="" className="h-14 w-14 rounded-lg object-cover shrink-0" />}
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </Shell>
@@ -1215,16 +1348,6 @@ function UrgencyBadge({ level }: { level: "LOW" | "MEDIUM" | "HIGH" | null }) {
   if (!level) return null;
   const styles = level === "HIGH" ? { bg: "#4A1A1A", fg: "#E05555" } : level === "MEDIUM" ? { bg: "#4A3A1A", fg: COLOR.gold } : { bg: "#2A4A2A", fg: "#6BCB77" };
   return <span className="rounded-full px-3 py-1 text-[11px] font-semibold" style={{ background: styles.bg, color: styles.fg }}>{level}</span>;
-}
-
-function parseDiagnosis(text: string): { disease: string; symptoms: string; treatment: string; feeding: string; urgency: "LOW" | "MEDIUM" | "HIGH" | null } {
-  const pick = (k: string) => {
-    const re = new RegExp(`${k}\\s*[:：]\\s*([\\s\\S]*?)(?=\\n[A-Z][A-Z ]+:|$)`, "i");
-    return text.match(re)?.[1]?.trim() ?? "";
-  };
-  const u = pick("URGENCY").toUpperCase();
-  const urgency: "LOW" | "MEDIUM" | "HIGH" | null = u.includes("HIGH") ? "HIGH" : u.includes("MEDIUM") ? "MEDIUM" : u.includes("LOW") ? "LOW" : null;
-  return { disease: pick("DISEASE"), symptoms: pick("SYMPTOMS"), treatment: pick("TREATMENT"), feeding: pick("FEEDING"), urgency };
 }
 
 // ---------- Weather ----------
@@ -1373,12 +1496,65 @@ export function Market({ user, onBack }: { user: User; onBack: () => void }) {
   );
 }
 
-// ---------- Sell ----------
+// ---------- Sell (legacy redirect kept for compat) ----------
 export function Sell({ user, farm, onBack }: { user: User; farm: Farm; onBack: () => void }) {
+  return <Marketplace user={user} farm={farm} onBack={onBack} />;
+}
+
+// ---------- Marketplace: Sell Fish / Buy Fish ----------
+export function Marketplace({ user, farm, onBack }: { user: User; farm: Farm; onBack: () => void }) {
   const gen = useServerFn(generateBuyers);
-  const [buyers, setBuyers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => { setLoading(true); gen({ data: {} }).then((r) => setBuyers(r.buyers)).catch(() => {}).finally(() => setLoading(false)); }, [gen]);
+  const [tab, setTab] = useState<"listings" | "post">("listings");
+  const [listings, setListings] = useState<FishListing[]>(() => Store.getListings());
+  const [buyers, setBuyers] = useState<{ buyer_name: string; location: string; quantity_kg: number; fish_type: string; price_per_kg: number; urgent: boolean }[]>([]);
+  const [loadingBuyers, setLoadingBuyers] = useState(true);
+
+  // New listing form
+  const [postType, setPostType] = useState<"sell" | "buy">("sell");
+  const [fishType, setFishType] = useState(farm.fishType || "");
+  const [quantity, setQuantity] = useState(farm.fishCount || 0);
+  const [price, setPrice] = useState(0);
+  const [description, setDescription] = useState("");
+  const [image, setImage] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setLoadingBuyers(true);
+    gen({ data: {} }).then((r) => setBuyers(r.buyers)).catch(() => {}).finally(() => setLoadingBuyers(false));
+  }, [gen]);
+
+  async function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
+    setImage(dataUrl);
+    e.target.value = "";
+  }
+
+  function postListing() {
+    if (!fishType.trim() || quantity <= 0 || price <= 0) return;
+    setPosting(true);
+    const listing: FishListing = {
+      id: String(Date.now()),
+      sellerName: user.name,
+      sellerPhone: user.phone,
+      region: user.region,
+      fishType,
+      quantity,
+      pricePerKg: price,
+      description,
+      image: image ?? undefined,
+      ts: Date.now(),
+      isBuying: postType === "buy",
+    };
+    const next = [listing, ...listings];
+    Store.setListings(next);
+    setListings(next);
+    setPosting(false);
+    setTab("listings");
+    // reset form
+    setFishType(farm.fishType || ""); setQuantity(0); setPrice(0); setDescription(""); setImage(null);
+  }
 
   const cfg = farm.fishSize === "Fingerling" ? 120 : farm.fishSize === "Medium" ? 60 : 14;
   const stock = farm.stockDate ? new Date(farm.stockDate) : null;
@@ -1386,39 +1562,179 @@ export function Sell({ user, farm, onBack }: { user: User; farm: Farm; onBack: (
 
   return (
     <Shell>
-      <TopBar onBack={onBack} title="Sell My Fish" />
+      <TopBar onBack={onBack} title="Sell Fish / Buy Fish" />
       <div className="px-5 pb-8 space-y-4">
-        <Card accent>
-          <div className="flex items-center justify-between">
-            <Eyebrow gold>Your Listing</Eyebrow>
-            <span className="text-[12px]" style={{ color: COLOR.gold }}>Edit Listing</span>
-          </div>
-          <div className="mt-2 text-[15px] font-bold" style={{ color: COLOR.text }}>{farm.fishCount.toLocaleString()} {farm.fishType || "Fish"} · Ready in {daysReady} days</div>
-          <div className="text-[12px]" style={{ color: COLOR.muted }}>{user.farmName} · {user.region}</div>
-        </Card>
 
-        <Eyebrow gold>Buyer Requests</Eyebrow>
-        {loading && <div className="flex justify-center py-6"><Spinner /></div>}
-        <div className="space-y-2">
-          {buyers.map((b, i) => (
-            <Card key={i}>
-              <div className="flex items-center justify-between">
-                <div className="text-[14px] font-bold" style={{ color: COLOR.text }}>{b.buyer_name}</div>
-                {b.urgent && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: COLOR.gold, color: COLOR.bg }}>URGENT</span>}
-              </div>
-              <div className="mt-1 flex items-center justify-between">
-                <div className="text-[12px]" style={{ color: COLOR.muted }}>{b.quantity_kg}kg {b.fish_type}</div>
-                <div className="text-[14px] font-bold" style={{ color: COLOR.gold }}>{fmtGHS(b.price_per_kg)}/kg</div>
-              </div>
-              <div className="mt-1 flex items-center justify-between">
-                <div className="text-[11px]" style={{ color: COLOR.muted }}>{b.location}</div>
-                <span className="text-[12px]" style={{ color: COLOR.gold }}>Contact Buyer</span>
-              </div>
-            </Card>
+        {/* Tab switcher */}
+        <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${COLOR.div}` }}>
+          {(["listings", "post"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className="flex-1 py-2.5 text-[13px] font-semibold"
+              style={{ background: tab === t ? COLOR.gold : COLOR.card, color: tab === t ? COLOR.bg : COLOR.muted }}
+            >
+              {t === "listings" ? "Browse" : "+ Post"}
+            </button>
           ))}
         </div>
 
-        <Btn>List My Fish for Sale</Btn>
+        {tab === "listings" && (
+          <>
+            {/* My listing summary */}
+            <Card accent>
+              <div className="flex items-center justify-between">
+                <Eyebrow gold>Your Farm</Eyebrow>
+                <span className="text-[12px]" style={{ color: COLOR.gold }}>Ready in {daysReady}d</span>
+              </div>
+              <div className="mt-2 text-[15px] font-bold" style={{ color: COLOR.text }}>{farm.fishCount.toLocaleString()} {farm.fishType || "Fish"}</div>
+              <div className="text-[12px]" style={{ color: COLOR.muted }}>{user.farmName} · {user.region}</div>
+            </Card>
+
+            {/* Community listings */}
+            {listings.length > 0 && (
+              <>
+                <Eyebrow gold>Community Listings</Eyebrow>
+                <div className="space-y-2">
+                  {listings.map((l) => (
+                    <Card key={l.id}>
+                      <div className="flex gap-3">
+                        {l.image && <img src={l.image} alt="" className="h-16 w-16 rounded-lg object-cover shrink-0" />}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="text-[14px] font-bold truncate" style={{ color: COLOR.text }}>{l.fishType}</div>
+                            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0" style={{ background: l.isBuying ? "#1A3A4A" : "#1A4A1A", color: l.isBuying ? "#6BB8CB" : COLOR.ok }}>
+                              {l.isBuying ? "BUYING" : "SELLING"}
+                            </span>
+                          </div>
+                          <div className="text-[13px] font-bold mt-0.5" style={{ color: COLOR.gold }}>{fmtGHS(l.pricePerKg)}/kg · {l.quantity.toLocaleString()} fish</div>
+                          {l.description && <div className="text-[11px] mt-0.5 truncate" style={{ color: COLOR.muted }}>{l.description}</div>}
+                          <div className="text-[11px] mt-1" style={{ color: COLOR.muted }}>{l.sellerName} · {l.region}</div>
+                        </div>
+                      </div>
+                      <button className="mt-2 w-full py-1.5 rounded-lg text-[12px] font-semibold" style={{ border: `1px solid ${COLOR.goldSoft}`, color: COLOR.gold }}>
+                        Contact · {l.sellerPhone}
+                      </button>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* AI Buyer requests */}
+            <Eyebrow gold>Buyer Requests</Eyebrow>
+            {loadingBuyers && <div className="flex justify-center py-6"><Spinner /></div>}
+            <div className="space-y-2">
+              {buyers.map((b, i) => (
+                <Card key={i}>
+                  <div className="flex items-center justify-between">
+                    <div className="text-[14px] font-bold" style={{ color: COLOR.text }}>{b.buyer_name}</div>
+                    {b.urgent && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: COLOR.gold, color: COLOR.bg }}>URGENT</span>}
+                  </div>
+                  <div className="mt-1 flex items-center justify-between">
+                    <div className="text-[12px]" style={{ color: COLOR.muted }}>{b.quantity_kg}kg {b.fish_type}</div>
+                    <div className="text-[14px] font-bold" style={{ color: COLOR.gold }}>{fmtGHS(b.price_per_kg)}/kg</div>
+                  </div>
+                  <div className="text-[11px]" style={{ color: COLOR.muted }}>{b.location}</div>
+                </Card>
+              ))}
+            </div>
+          </>
+        )}
+
+        {tab === "post" && (
+          <div className="space-y-4">
+            <AmaBubble>Post your fish for sale or let others know you're looking to buy. The whole community can see it!</AmaBubble>
+
+            {/* Sell / Buy toggle */}
+            <div className="flex gap-2">
+              {(["sell", "buy"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setPostType(t)}
+                  className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold"
+                  style={{ border: `1px solid ${postType === t ? COLOR.gold : COLOR.div}`, color: postType === t ? COLOR.gold : COLOR.muted, background: COLOR.card }}
+                >
+                  {t === "sell" ? "🐟 I want to sell" : "🛒 I want to buy"}
+                </button>
+              ))}
+            </div>
+
+            {/* Fish photo upload */}
+            <button onClick={() => fileRef.current?.click()} className="w-full rounded-xl overflow-hidden" style={{ border: `1.5px dashed ${image ? COLOR.gold : COLOR.goldSoft}` }}>
+              {image ? (
+                <div className="relative">
+                  <img src={image} alt="fish" className="w-full h-48 object-cover" />
+                  <div className="absolute top-2 right-2 rounded-full p-1.5" style={{ background: "rgba(0,0,0,0.6)" }}>
+                    <Camera size={16} color={COLOR.gold} />
+                  </div>
+                </div>
+              ) : (
+                <div className="py-8 flex flex-col items-center gap-2">
+                  <Camera size={28} color={COLOR.gold} />
+                  <div className="text-[13px] font-semibold" style={{ color: COLOR.gold }}>Add Fish Photo</div>
+                  <div className="text-[11px]" style={{ color: COLOR.muted }}>Upload a photo to attract buyers</div>
+                </div>
+              )}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onPickImage} />
+
+            <Field label="Fish Type">
+              <input
+                list="fish-suggestions"
+                value={fishType}
+                onChange={(e) => setFishType(e.target.value)}
+                placeholder="e.g. Tilapia, Catfish"
+                className="w-full bg-transparent outline-none text-[15px]"
+                style={{ color: COLOR.text }}
+              />
+              <datalist id="fish-suggestions-market">
+                {["Tilapia", "Catfish", "Heterotis", "Mudfish", "Carp"].map((s) => <option key={s} value={s} />)}
+              </datalist>
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Quantity (fish)">
+                <input
+                  inputMode="numeric"
+                  value={quantity || ""}
+                  onChange={(e) => setQuantity(Number(e.target.value.replace(/[^0-9]/g, "")) || 0)}
+                  placeholder="e.g. 100"
+                  className="w-full bg-transparent outline-none text-[15px]"
+                  style={{ color: COLOR.text }}
+                />
+              </Field>
+              <Field label="Price/kg (GHS)">
+                <input
+                  inputMode="numeric"
+                  value={price || ""}
+                  onChange={(e) => setPrice(Number(e.target.value.replace(/[^0-9]/g, "")) || 0)}
+                  placeholder="e.g. 35"
+                  className="w-full bg-transparent outline-none text-[15px]"
+                  style={{ color: COLOR.text }}
+                />
+              </Field>
+            </div>
+
+            <Field label="Description (optional)">
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Any extra details about your fish..."
+                className="w-full bg-transparent outline-none text-[15px]"
+                style={{ color: COLOR.text }}
+              />
+            </Field>
+
+            <Btn
+              variant="solid"
+              onClick={postListing}
+              disabled={posting || !fishType.trim() || quantity <= 0 || price <= 0}
+            >
+              {posting ? "Posting…" : `Post ${postType === "sell" ? "Fish for Sale" : "Buy Request"}`}
+            </Btn>
+          </div>
+        )}
       </div>
     </Shell>
   );
@@ -1601,21 +1917,41 @@ function Toggle({ Icon, label, value, onChange }: { Icon: typeof Bell; label: st
   );
 }
 
-// ---------- Notifications ----------
+// ---------- Notifications (AI alerts) ----------
 export function Notifications({ notifs, onBack, onRead }: { notifs: Notif[]; onBack: () => void; onRead: () => void }) {
   useEffect(() => { onRead(); }, [onRead]);
+
+  const kindIcon = (kind: Notif["kind"]) => {
+    if (kind === "ai") return <Fish size={18} color={COLOR.gold} className="mt-0.5" />;
+    if (kind === "weather") return <Cloud size={18} color={COLOR.warn} className="mt-0.5" />;
+    if (kind === "harvest") return <TrendingUp size={18} color={COLOR.gold} className="mt-0.5" />;
+    if (kind === "feed") return <Layers size={18} color={COLOR.gold} className="mt-0.5" />;
+    return <Bell size={18} color={COLOR.gold} className="mt-0.5" />;
+  };
+
   return (
     <Shell>
-      <TopBar onBack={onBack} title="Alerts" />
+      <TopBar onBack={onBack} title="Notifications" />
       <div className="px-5 pb-8 space-y-2">
-        {notifs.length === 0 && <Card><div className="text-[13px]" style={{ color: COLOR.muted }}>You're all caught up.</div></Card>}
+        {notifs.length === 0 && (
+          <Card>
+            <div className="flex flex-col items-center py-6 gap-2">
+              <Bell size={32} color={COLOR.muted} />
+              <div className="text-[13px]" style={{ color: COLOR.muted }}>You're all caught up!</div>
+              <div className="text-[11px] text-center" style={{ color: COLOR.nav }}>Ama will notify you about your fish, weather, and market updates here.</div>
+            </div>
+          </Card>
+        )}
         {notifs.slice().reverse().map((n) => (
-          <Card key={n.id}>
+          <Card key={n.id} className={n.read ? "" : "opacity-100"}>
             <div className="flex items-start gap-3">
-              <Bell size={18} color={COLOR.gold} className="mt-0.5" />
+              {kindIcon(n.kind)}
               <div className="flex-1">
-                <div className="text-[14px] font-bold" style={{ color: COLOR.text }}>{n.title}</div>
-                <div className="text-[12px]" style={{ color: COLOR.muted }}>{n.body}</div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[14px] font-bold" style={{ color: COLOR.text }}>{n.title}</div>
+                  {!n.read && <span className="h-2 w-2 rounded-full shrink-0" style={{ background: COLOR.gold }} />}
+                </div>
+                <div className="text-[13px] mt-0.5 leading-relaxed" style={{ color: COLOR.muted }}>{n.body}</div>
                 <div className="mt-1 text-[10px]" style={{ color: COLOR.nav }}>{new Date(n.ts).toLocaleString()}</div>
               </div>
             </div>

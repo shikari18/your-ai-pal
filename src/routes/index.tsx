@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Splash, Register, Onboarding1, Onboarding2, Onboarding3,
-  Dashboard, Chat, FeedCalc, FishDoctor, Weather, Market, Sell,
+  Dashboard, Chat, FeedCalc, PondJournal, Weather, Market, Sell, Marketplace,
   CreditScore, Profile, Notifications, BottomNav, Shell,
   type Screen,
 } from "@/components/screens";
@@ -40,25 +40,40 @@ function App() {
     setHydrated(true);
   }, []);
 
+  // Handle farm updates from chat (AI actions)
+  function handleFarmUpdate(updated: Farm) {
+    setFarm(updated);
+    Store.setFarm(updated);
+  }
+
   // load weather + briefing when dashboard ready
   const refreshWeatherAndBriefing = useCallback(async (u: User, f: Farm) => {
     let w: WeatherSnapshot | null = null;
     if (f.lat && f.lon) {
       try { w = await fetchWeather(f.lat, f.lon); setWeather(w); } catch {}
     }
-    setRefreshing(true);
-    try {
-      const summary = w ? `${w.current.condition}, ${w.current.temp}°C, rain probability next 6h ${w.hourlyPrecipMaxNext6h}%` : "no weather data";
-      const hr = new Date().getHours();
-      const timeOfDay = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
-      const { briefing } = await genBrief({
-        data: {
-          name: u.name, fishCount: f.fishCount, fishType: f.fishType || "fish",
-          farmName: u.farmName, region: u.region, weather: summary, timeOfDay,
-        },
-      });
-      setBriefing(briefing);
-    } catch { setBriefing("Ama is resting, please try again."); } finally { setRefreshing(false); }
+
+    // Only generate briefing occasionally (not every load) — use as a reminder
+    const lastBriefTs = Number(localStorage.getItem("ffo.lastBriefTs") || "0");
+    const hoursSinceLast = (Date.now() - lastBriefTs) / 3_600_000;
+    const shouldBrief = hoursSinceLast >= 6; // at most every 6 hours
+
+    if (shouldBrief) {
+      setRefreshing(true);
+      try {
+        const summary = w ? `${w.current.condition}, ${w.current.temp}°C, rain probability next 6h ${w.hourlyPrecipMaxNext6h}%` : "no weather data";
+        const hr = new Date().getHours();
+        const timeOfDay = hr < 12 ? "morning" : hr < 17 ? "afternoon" : "evening";
+        const { briefing } = await genBrief({
+          data: {
+            name: u.name, fishCount: f.fishCount, fishType: f.fishType || "fish",
+            farmName: u.farmName, region: u.region, weather: summary, timeOfDay,
+          },
+        });
+        setBriefing(briefing);
+        localStorage.setItem("ffo.lastBriefTs", String(Date.now()));
+      } catch { setBriefing(null); } finally { setRefreshing(false); }
+    }
 
     // build notifications
     const next: Notif[] = [...Store.getNotifs()];
@@ -67,6 +82,15 @@ function App() {
       if (next.some((x) => x.id === id)) return;
       next.push({ id, ts: Date.now(), read: false, ...n } as Notif);
     }
+
+    // Deliver the pond photo analysis as a notification (from onboarding)
+    if (f.pondPhotoAnalysis) {
+      const pondNotifId = `ai-pond-analysis`;
+      if (!next.some((x) => x.id === pondNotifId)) {
+        next.push({ id: pondNotifId, ts: Date.now(), read: false, kind: "ai", title: "Pond Analysis Ready", body: f.pondPhotoAnalysis });
+      }
+    }
+
     if (w && w.hourlyPrecipMaxNext6h >= 70) push({ kind: "weather", title: "Heavy rain expected", body: "Check pond inlets and reduce feeding today." });
     const lastFeed = Store.getFeed().slice(-1)[0];
     if (!lastFeed || Date.now() - new Date(lastFeed.date).getTime() > 18 * 3600 * 1000)
@@ -81,10 +105,12 @@ function App() {
   }, [genBrief]);
 
   useEffect(() => {
-    if (screen === "dashboard" && user && !briefing) {
+    if (screen === "dashboard" && user) {
       void refreshWeatherAndBriefing(user, farm);
     }
-  }, [screen, user, farm, briefing, refreshWeatherAndBriefing]);
+  // Run once when hitting dashboard
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, user]);
 
   const profitEstimate = useMemo(() => {
     const w = farm.fishSize === "Fingerling" ? 0.01 : farm.fishSize === "Medium" ? 0.2 : 0.45;
@@ -98,7 +124,7 @@ function App() {
   if (screen === "register")
     return <Register onBack={() => setScreen("splash")} onDone={(u) => { Store.setUser(u); setUser(u); setScreen("onboarding-1"); }} />;
   if (screen === "onboarding-1")
-    return user ? <Onboarding1 user={user} onNext={() => setScreen("onboarding-2")} onSkip={() => setScreen("onboarding-2")} /> : null;
+    return user ? <Onboarding1 user={user} onNext={() => setScreen("onboarding-2")} /> : null;
   if (screen === "onboarding-2")
     return <Onboarding2 onNext={() => { setFarm(Store.getFarm()); setScreen("onboarding-3"); }} />;
   if (screen === "onboarding-3")
@@ -107,7 +133,7 @@ function App() {
   if (!user) { setScreen("splash"); return null; }
 
   // chat is full screen (no bottom nav, has its own input)
-  if (screen === "chat") return <Chat user={user} farm={farm} onBack={() => setScreen("dashboard")} />;
+  if (screen === "chat") return <Chat user={user} farm={farm} onBack={() => setScreen("dashboard")} onFarmUpdate={handleFarmUpdate} />;
 
   const useNav = NAV_SCREENS.includes(screen);
 
@@ -123,10 +149,11 @@ function App() {
       />
     );
   } else if (screen === "feed-calc") body = <FeedCalc farm={farm} onBack={() => setScreen("dashboard")} />;
-  else if (screen === "fish-doctor") body = <FishDoctor onBack={() => setScreen("dashboard")} />;
+  else if (screen === "pond-journal") body = <PondJournal farm={farm} onBack={() => setScreen("dashboard")} />;
   else if (screen === "weather") body = <Weather farm={farm} user={user} onBack={() => setScreen("dashboard")} />;
   else if (screen === "market") body = <Market user={user} onBack={() => setScreen("dashboard")} />;
   else if (screen === "sell") body = <Sell user={user} farm={farm} onBack={() => setScreen("dashboard")} />;
+  else if (screen === "marketplace") body = <Marketplace user={user} farm={farm} onBack={() => setScreen("dashboard")} />;
   else if (screen === "credit-score") body = <CreditScore user={user} farm={farm} onBack={() => setScreen("profile")} />;
   else if (screen === "notifications") body = <Notifications notifs={notifs} onBack={() => setScreen("dashboard")} onRead={() => {
     const n = Store.getNotifs().map((x) => ({ ...x, read: true })); Store.setNotifs(n); setNotifs(n);

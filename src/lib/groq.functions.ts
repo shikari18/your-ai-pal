@@ -4,19 +4,43 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const CHAT_MODEL = "llama-3.3-70b-versatile";
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
-export const SYSTEM_PROMPT = `You are Ama, a warm, knowledgeable AI fish farming assistant built into FishFarm OS Ghana. You help Ghanaian fish farmers with feeding, disease diagnosis, water quality, market timing, harvesting, weather impacts, and loans.
-Rules:
-- Always respond in simple, clear language a rural farmer understands
-- If the farmer's selected language is Twi, respond in Twi
-- Be warm, encouraging, and practical — like a trusted friend
-- Keep responses to 2-4 sentences unless detail is needed
-- For feeding advice: always give exact quantities in bags or kg
-- For disease: suggest a local/cheap remedy before medicine
+export const SYSTEM_PROMPT = `You are Ama, a friendly AI companion for Ghanaian fish farmers built into FishFarm OS Ghana.
+
+PERSONALITY:
+- You are warm, conversational, and feel like a trusted friend the farmer can talk to anytime
+- Start conversations naturally — say hi, ask how they're doing, check in on their day
+- Be genuinely interested in the farmer as a person, not just their fish
+- Use casual, friendly language. Laugh, joke a little, be human
+- Don't always bring things back to fish — if they want to chat about life, chat about life
+- When they do need fish help, switch to expert mode naturally
+
+FISH EXPERTISE (when needed):
+- Give exact feeding quantities in bags or kg
+- For disease: suggest local/cheap Ghanaian remedy first before medicine
 - For market: give specific advice based on current price trends
 - For weather: translate weather data into direct farm actions
-- Never use technical jargon
-- Always end with one actionable next step
-- Reference the farmer's actual data when available (pond count, fish count, harvest date, location)`;
+- Reference the farmer's actual data when available
+
+LANGUAGE:
+- Respond in the farmer's selected language (Twi if set)
+- Keep language simple and clear for rural farmers
+- Use warm, encouraging tone
+
+FARM ACTIONS:
+- If the farmer tells you something changed about their farm (fish died, sold fish, added fish, added a pond, etc.), you MUST respond with a JSON action block so the app can update automatically
+- Format: [[ACTION:{"type":"update_farm","data":{...}}]]
+- For fish count changes use: {"type":"update_farm","data":{"fishCount": NUMBER}}
+- For pond count: {"type":"update_farm","data":{"pondCount": NUMBER}}
+- For fish type: {"type":"update_farm","data":{"fishType": "TYPE"}}
+- ALWAYS include the action AND a warm conversational response
+- Example: if user says "one of my fish died" → reply warmly about it AND include [[ACTION:{"type":"update_farm","data":{"fishCount": CURRENT_MINUS_1}}]]
+
+REMINDERS (occasional, not every message):
+- Sometimes gently remind about feeding if it's been a while
+- Mention harvest timing when it's getting close
+- Check in on pond health occasionally
+
+Be the kind of friend every farmer wishes they had — helpful when needed, good company always.`;
 
 async function groqChat(body: Record<string, unknown>) {
   const apiKey = process.env.GROQ_API_KEY;
@@ -37,7 +61,7 @@ async function groqChat(body: Record<string, unknown>) {
 type Msg = { role: "user" | "assistant"; content: string };
 
 export const askAma = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => {
+  .validator((d: unknown) => {
     const x = d as { messages: Msg[]; language?: string; farmContext?: string };
     if (!Array.isArray(x?.messages)) throw new Error("messages required");
     return { messages: x.messages.slice(-20), language: x.language ?? "English", farmContext: x.farmContext ?? "" };
@@ -48,13 +72,16 @@ export const askAma = createServerFn({ method: "POST" })
       model: CHAT_MODEL,
       messages: [{ role: "system", content: sys }, ...data.messages],
       max_tokens: 500,
-      temperature: 0.7,
+      temperature: 0.8,
     });
-    return { reply };
+    // Return the full reply (including action blocks) so the client can parse them,
+    // but also return a clean version for display
+    const displayReply = reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim();
+    return { reply, displayReply };
   });
 
 export const analyzePondImage = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => {
+  .validator((d: unknown) => {
     const x = d as { imageBase64: string };
     if (!x?.imageBase64) throw new Error("imageBase64 required");
     return x;
@@ -62,25 +89,26 @@ export const analyzePondImage = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const reply = await groqChat({
       model: VISION_MODEL,
-      max_tokens: 400,
+      max_tokens: 300,
       messages: [
         {
           role: "user",
           content: [
             {
               type: "text",
-              text: "You are an expert aquaculture consultant in Ghana. Analyse this pond photo. In 2 warm, simple sentences describe: (1) the pond type (earthen, concrete or cage), (2) one observation about visible water quality or conditions. Encourage the farmer.",
+              text: "You are an expert aquaculture consultant in Ghana. Analyse this pond photo. Write 2 warm, friendly sentences for the farmer: (1) what type of pond it appears to be, (2) one encouraging observation about their pond. Keep it simple, positive and plain text only — no bullet points, no labels, no technical jargon.",
             },
             { type: "image_url", image_url: { url: data.imageBase64 } },
           ],
         },
       ],
     });
-    return { analysis: reply };
+    const clean = reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim();
+    return { analysis: clean };
   });
 
 export const analyzeFishImage = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => {
+  .validator((d: unknown) => {
     const x = d as { imageBase64: string };
     if (!x?.imageBase64) throw new Error("imageBase64 required");
     return x;
@@ -112,16 +140,18 @@ No medical jargon.`,
   });
 
 export const generateBriefing = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => d as { name: string; fishCount: number; fishType: string; farmName: string; region: string; weather: string; timeOfDay: string })
+  .validator((d: unknown) => d as { name: string; fishCount: number; fishType: string; farmName: string; region: string; weather: string; timeOfDay: string })
   .handler(async ({ data }) => {
-    const prompt = `Generate a 2-3 sentence morning briefing for a Ghanaian fish farmer named ${data.name} who has ${data.fishCount} ${data.fishType} at ${data.farmName} in ${data.region}. Current weather: ${data.weather}. Time: ${data.timeOfDay}. Include: feeding advice with exact bag count, one weather-related farm action, one market observation. Be direct and specific. No greetings.`;
+    const prompt = `You are Ama, a friendly AI companion for a Ghanaian fish farmer. Write a short, warm, friendly reminder for ${data.name} who has ${data.fishCount} ${data.fishType} at ${data.farmName} in ${data.region}. Current weather: ${data.weather}. Time: ${data.timeOfDay}. Write 1-2 sentences max — a gentle nudge about the single most important thing to do right now. Be warm and friendly like a helpful friend. IMPORTANT: Output plain text only — no JSON, no action blocks, no brackets, nothing but the reminder text.`;
     const reply = await groqChat({
       model: CHAT_MODEL,
-      messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: prompt }],
-      max_tokens: 220,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 100,
       temperature: 0.7,
     });
-    return { briefing: reply };
+    // Strip any accidental action blocks before returning
+    const clean = reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim();
+    return { briefing: clean };
   });
 
 function safeJSON<T>(s: string, fb: T): T {
@@ -134,8 +164,9 @@ function safeJSON<T>(s: string, fb: T): T {
 }
 
 export const generateMarketPrices = createServerFn({ method: "POST" })
-  .inputValidator(() => ({}))
-  .handler(async () => {
+  .validator(() => ({}))
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  .handler(async (): Promise<any> => {
     const txt = await groqChat({
       model: CHAT_MODEL,
       response_format: { type: "json_object" },
@@ -153,11 +184,11 @@ Prices in GHS per kg. Realistic for Ghana 2026.`,
       max_tokens: 500,
       temperature: 0.6,
     });
-    return safeJSON(txt, {} as Record<string, any>);
+    return safeJSON(txt, {} as Record<string, unknown>);
   });
 
 export const generateWeatherAlerts = createServerFn({ method: "POST" })
-  .inputValidator((d: unknown) => d as { weatherSummary: string })
+  .validator((d: unknown) => d as { weatherSummary: string })
   .handler(async ({ data }) => {
     const txt = await groqChat({
       model: CHAT_MODEL,
@@ -172,12 +203,12 @@ export const generateWeatherAlerts = createServerFn({ method: "POST" })
       max_tokens: 400,
       temperature: 0.6,
     });
-    const j = safeJSON<{ alerts?: any[] }>(txt, { alerts: [] });
-    return { alerts: j.alerts ?? [] };
+    const j = safeJSON<{ alerts?: unknown[] }>(txt, { alerts: [] });
+    return { alerts: (j.alerts ?? []) as { urgency: string; title: string; description: string }[] };
   });
 
 export const generateBuyers = createServerFn({ method: "POST" })
-  .inputValidator(() => ({}))
+  .validator(() => ({}))
   .handler(async () => {
     const txt = await groqChat({
       model: CHAT_MODEL,
@@ -192,6 +223,6 @@ export const generateBuyers = createServerFn({ method: "POST" })
       max_tokens: 400,
       temperature: 0.8,
     });
-    const j = safeJSON<{ buyers?: any[] }>(txt, { buyers: [] });
-    return { buyers: j.buyers ?? [] };
+    const j = safeJSON<{ buyers?: unknown[] }>(txt, { buyers: [] });
+    return { buyers: (j.buyers ?? []) as { buyer_name: string; location: string; quantity_kg: number; fish_type: string; price_per_kg: number; urgent: boolean }[] };
   });
