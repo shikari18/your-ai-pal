@@ -389,58 +389,155 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-// ---------- Onboarding 1: Pond photo ----------
+// ---------- Onboarding 1: Pond photos ----------
 export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: string) => void; onSkip?: () => void }) {
   const analyze = useServerFn(analyzePondImage);
-  const [loading, setLoading] = useState(false);
-  const [uploaded, setUploaded] = useState(false);
+  const [step, setStep] = useState<"count" | "photos">("count");
+  const [pondCount, setPondCount] = useState(1);
+  const [photos, setPhotos] = useState<{ dataUrl: string; analysis: string; loading: boolean; done: boolean }[]>([]);
+  const [currentPond, setCurrentPond] = useState(0);
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  function startPhotos() {
+    // Save pond count to farm
+    const farm = Store.getFarm();
+    Store.setFarm({ ...farm, pondCount });
+    // Init photo slots
+    setPhotos(Array.from({ length: pondCount }, () => ({ dataUrl: "", analysis: "", loading: false, done: false })));
+    setCurrentPond(0);
+    setStep("photos");
+  }
+
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return;
-    setErr(null); setLoading(true);
+    setErr(null);
+    const dataUrl = await new Promise<string>((res, rej) => {
+      const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f);
+    });
+    // Mark loading for current pond
+    setPhotos((prev) => prev.map((p, i) => i === currentPond ? { ...p, dataUrl, loading: true, done: false } : p));
     try {
-      const dataUrl = await new Promise<string>((res, rej) => {
-        const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(f);
-      });
-      // Silently analyse and save — don't show the result during onboarding
       const { analysis } = await analyze({ data: { imageBase64: dataUrl } });
-      const farm = Store.getFarm(); Store.setFarm({ ...farm, pondPhotoAnalysis: analysis });
-      setUploaded(true);
+      setPhotos((prev) => {
+        const next = prev.map((p, i) => i === currentPond ? { ...p, analysis, loading: false, done: true } : p);
+        // Save all analyses to farm
+        const allAnalyses = next.filter((p) => p.done).map((p, i) => `Pond ${i + 1}: ${p.analysis}`).join("\n\n");
+        const farm = Store.getFarm();
+        Store.setFarm({ ...farm, pondPhotoAnalysis: allAnalyses });
+        return next;
+      });
+      // Auto-advance to next pond
+      if (currentPond < pondCount - 1) setCurrentPond((c) => c + 1);
     } catch {
       setErr("Could not analyse photo, please try again.");
-    } finally { setLoading(false); }
+      setPhotos((prev) => prev.map((p, i) => i === currentPond ? { ...p, loading: false } : p));
+    }
+    e.target.value = "";
+  }
+
+  const allDone = photos.length > 0 && photos.every((p) => p.done);
+  const anyDone = photos.some((p) => p.done);
+
+  if (step === "count") {
+    return (
+      <Shell>
+        <Progress step={1} total={3} />
+        <div className="px-6 pt-5 pb-8 space-y-5">
+          <AmaBubble>Hi {firstName(user.name)}! I'm Fish Doctor 🐟 How many ponds do you have on your farm?</AmaBubble>
+
+          <div className="rounded-xl p-5" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}` }}>
+            <Eyebrow gold>Number of ponds</Eyebrow>
+            <div className="mt-4 flex items-center justify-between">
+              <button onClick={() => setPondCount((c) => Math.max(1, c - 1))} className="h-12 w-12 rounded-full flex items-center justify-center text-xl" style={{ border: `1px solid ${COLOR.div}`, color: COLOR.text }}>−</button>
+              <div className="text-[48px] font-bold" style={{ color: COLOR.gold }}>{pondCount}</div>
+              <button onClick={() => setPondCount((c) => Math.min(10, c + 1))} className="h-12 w-12 rounded-full flex items-center justify-center text-xl" style={{ background: COLOR.gold, color: COLOR.bg }}>+</button>
+            </div>
+            <div className="mt-2 text-center text-[12px]" style={{ color: COLOR.muted }}>
+              {pondCount === 1 ? "1 pond" : `${pondCount} ponds`}
+            </div>
+          </div>
+
+          <Btn variant="solid" onClick={startPhotos}>Next — Add Pond Photos</Btn>
+          <div className="text-center">
+            <button onClick={() => { const farm = Store.getFarm(); Store.setFarm({ ...farm, pondCount }); onNext(undefined); }} className="text-[12px]" style={{ color: COLOR.muted }}>Skip photos for now</button>
+          </div>
+        </div>
+      </Shell>
+    );
   }
 
   return (
     <Shell>
       <Progress step={1} total={3} />
-      <div className="px-6 pt-5 pb-8 space-y-5">
-        <AmaBubble>Hi {firstName(user.name)}! I'm Fish Doctor, your personal farming companion. Let me take a quick look at your pond — upload a photo and I'll have a full report waiting for you once you're set up.</AmaBubble>
+      <div className="px-6 pt-5 pb-8 space-y-4">
+        <AmaBubble>
+          {allDone
+            ? `Great! I've analysed all ${pondCount} pond${pondCount > 1 ? "s" : ""}. You're all set!`
+            : `Upload a photo of pond ${currentPond + 1} of ${pondCount} so I can analyse it for you.`}
+        </AmaBubble>
 
-        <button onClick={() => fileRef.current?.click()} className="block w-full rounded-xl py-10 px-4 text-center" style={{ background: COLOR.card, border: `1.5px dashed ${uploaded ? COLOR.gold : COLOR.goldSoft}` }}>
-          {loading ? (
-            <div className="flex flex-col items-center gap-2"><Spinner size={28} /><div className="text-[12px]" style={{ color: COLOR.muted }}>Got it, analysing…</div></div>
-          ) : uploaded ? (
+        {/* Pond tabs */}
+        {pondCount > 1 && (
+          <div className="flex gap-2 flex-wrap">
+            {photos.map((p, i) => (
+              <button key={i} onClick={() => setCurrentPond(i)}
+                className="px-3 py-1.5 rounded-full text-[12px] font-semibold"
+                style={{
+                  background: currentPond === i ? COLOR.gold : COLOR.card,
+                  color: currentPond === i ? COLOR.bg : p.done ? COLOR.ok : COLOR.muted,
+                  border: `1px solid ${p.done ? COLOR.ok : currentPond === i ? COLOR.gold : COLOR.div}`,
+                }}>
+                {p.done ? "✓" : ""} Pond {i + 1}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Current pond upload */}
+        <button onClick={() => fileRef.current?.click()}
+          className="block w-full rounded-xl py-8 px-4 text-center"
+          style={{ background: COLOR.card, border: `1.5px dashed ${photos[currentPond]?.done ? COLOR.ok : COLOR.goldSoft}` }}>
+          {photos[currentPond]?.loading ? (
+            <div className="flex flex-col items-center gap-2"><Spinner size={28} /><div className="text-[12px]" style={{ color: COLOR.muted }}>Analysing pond {currentPond + 1}…</div></div>
+          ) : photos[currentPond]?.done ? (
             <div className="flex flex-col items-center gap-2">
-              <CheckCircle2 size={28} color={COLOR.gold} />
-              <div className="text-[13px] font-semibold" style={{ color: COLOR.gold }}>Pond photo saved!</div>
+              {photos[currentPond].dataUrl && <img src={photos[currentPond].dataUrl} alt="" className="h-32 w-full object-cover rounded-lg mb-1" />}
+              <CheckCircle2 size={24} color={COLOR.ok} />
+              <div className="text-[13px] font-semibold" style={{ color: COLOR.ok }}>Pond {currentPond + 1} analysed!</div>
               <div className="text-[11px]" style={{ color: COLOR.muted }}>Tap to replace</div>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2">
               <Upload size={28} color={COLOR.gold} />
-              <div className="text-[13px]" style={{ color: COLOR.muted }}>Tap to upload pond photo</div>
+              <div className="text-[13px]" style={{ color: COLOR.muted }}>Upload photo of Pond {currentPond + 1}</div>
             </div>
           )}
         </button>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onFile} />
 
+        {/* Analysis previews */}
+        {photos.filter((p) => p.done).length > 0 && (
+          <div className="space-y-2">
+            <Eyebrow gold>Analysis Results</Eyebrow>
+            {photos.map((p, i) => p.done && (
+              <div key={i} className="rounded-xl p-3 text-[12px] leading-relaxed" style={{ background: COLOR.card, border: `1px solid ${COLOR.div}`, color: COLOR.muted }}>
+                <span className="font-semibold" style={{ color: COLOR.gold }}>Pond {i + 1}: </span>{p.analysis}
+              </div>
+            ))}
+          </div>
+        )}
+
         {err && <div className="text-[12px]" style={{ color: COLOR.danger }}>{err}</div>}
 
-        <Btn onClick={() => onNext(Store.getFarm().pondPhotoAnalysis ?? undefined)} disabled={!uploaded && !Store.getFarm().pondPhotoAnalysis}>Next</Btn>
-        {!uploaded && !Store.getFarm().pondPhotoAnalysis && (
+        <Btn
+          variant={allDone ? "solid" : "outline"}
+          onClick={() => onNext(Store.getFarm().pondPhotoAnalysis ?? undefined)}
+          disabled={!anyDone && !Store.getFarm().pondPhotoAnalysis}
+        >
+          {allDone ? "Continue →" : anyDone ? `Continue with ${photos.filter((p) => p.done).length}/${pondCount} ponds` : "Next"}
+        </Btn>
+        {!anyDone && (
           <div className="text-center">
             <button onClick={() => onNext(undefined)} className="text-[12px]" style={{ color: COLOR.muted }}>Skip for now</button>
           </div>
