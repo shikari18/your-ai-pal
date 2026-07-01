@@ -5,17 +5,17 @@ import {
   Calculator, Stethoscope, BarChart2, ShoppingBag, Tag, Cloud, CloudRain, Sun,
   Volume2, Layers, Fish, TrendingUp, TrendingDown, Minus, Plus, CheckCircle2,
   Trash2, Loader2, X, Settings as SettingsIcon, MessageCircle, Home as HomeIcon,
-  LogIn, Phone, PhoneOff, Radio, Store as StoreIcon, PlusCircle,
+  LogIn, Phone, PhoneOff, Radio, Store as StoreIcon, PlusCircle, History, SquarePen,
 } from "lucide-react";
 import {
-  Store, type User, type Farm, type ChatMessage, type FeedLog, type Notif, type FishListing,
+  Store, type User, type Farm, type ChatMessage, type ChatSession, type FeedLog, type Notif, type FishListing,
   greetingForHour, fmtGHS, fmtDate, initials, firstName, daysBetween,
 } from "@/lib/storage";
 import { fetchWeather, type WeatherSnapshot } from "@/lib/weather";
 import { speak, speakGemini, recordAndTranscribe } from "@/lib/voice";
 import {
   askAma, analyzePondImage, analyzeFishImage, generateBriefing,
-  generateMarketPrices, generateWeatherAlerts, generateBuyers,
+  generateMarketPrices, generateWeatherAlerts, generateBuyers, SYSTEM_PROMPT,
 } from "@/lib/groq.functions";
 
 const COLOR = {
@@ -27,7 +27,7 @@ const COLOR = {
 export type Screen =
   | "splash" | "register" | "onboarding-1" | "onboarding-2" | "onboarding-3"
   | "dashboard" | "chat" | "feed-calc" | "pond-journal" | "weather"
-  | "market" | "sell" | "credit-score" | "profile" | "notifications" | "marketplace";
+  | "market" | "sell" | "credit-score" | "profile" | "notifications" | "marketplace" | "shop";
 
 const LANGS = ["English", "Twi", "Ga", "Ewe", "Hausa"] as const;
 const REGIONS = [
@@ -132,7 +132,7 @@ function Logo({ size = 64 }: { size?: number }) {
   return (
     <img
       src="/logo.png"
-      alt="FishFarm OS"
+      alt="Fish Doctor"
       width={size}
       height={size}
       style={{ borderRadius: "50%", objectFit: "cover", border: `1.5px solid ${COLOR.gold}` }}
@@ -140,11 +140,130 @@ function Logo({ size = 64 }: { size?: number }) {
   );
 }
 
+// ============== Markdown Renderer ==============
+function renderMarkdown(text: string): React.ReactNode[] {
+  const lines = text.split("\n");
+  const nodes: React.ReactNode[] = [];
+  let key = 0;
+
+  function inlineFormat(line: string): React.ReactNode {
+    // Split on **bold**, *italic*, `code`
+    const parts = line.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={i} style={{ color: COLOR.gold, fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+      }
+      if (part.startsWith("*") && part.endsWith("*")) {
+        return <em key={i} style={{ color: COLOR.text, fontStyle: "italic" }}>{part.slice(1, -1)}</em>;
+      }
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return <code key={i} className="rounded px-1 text-[13px]" style={{ background: COLOR.card2, color: COLOR.gold, fontFamily: "monospace" }}>{part.slice(1, -1)}</code>;
+      }
+      return part;
+    });
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // H1 — # heading
+    if (/^# (.+)/.test(line)) {
+      nodes.push(
+        <div key={key++} className="text-[17px] font-bold mt-2 mb-1" style={{ color: COLOR.gold }}>
+          {inlineFormat(line.replace(/^# /, ""))}
+        </div>
+      );
+    }
+    // H2 — ## heading
+    else if (/^## (.+)/.test(line)) {
+      nodes.push(
+        <div key={key++} className="text-[15px] font-bold mt-2 mb-0.5 uppercase tracking-wide" style={{ color: COLOR.gold }}>
+          {inlineFormat(line.replace(/^## /, ""))}
+        </div>
+      );
+    }
+    // H3 — ### heading
+    else if (/^### (.+)/.test(line)) {
+      nodes.push(
+        <div key={key++} className="text-[14px] font-semibold mt-1.5 mb-0.5" style={{ color: COLOR.gold }}>
+          {inlineFormat(line.replace(/^### /, ""))}
+        </div>
+      );
+    }
+    // Bullet — - or *
+    else if (/^[\-\*] (.+)/.test(line)) {
+      nodes.push(
+        <div key={key++} className="flex gap-1.5 pl-1 mt-0.5">
+          <span style={{ color: COLOR.gold, flexShrink: 0 }}>•</span>
+          <span>{inlineFormat(line.replace(/^[\-\*] /, ""))}</span>
+        </div>
+      );
+    }
+    // Numbered list
+    else if (/^\d+\. (.+)/.test(line)) {
+      const num = line.match(/^(\d+)\./)?.[1];
+      nodes.push(
+        <div key={key++} className="flex gap-1.5 pl-1 mt-0.5">
+          <span style={{ color: COLOR.gold, flexShrink: 0 }}>{num}.</span>
+          <span>{inlineFormat(line.replace(/^\d+\. /, ""))}</span>
+        </div>
+      );
+    }
+    // Divider
+    else if (/^---+$/.test(line)) {
+      nodes.push(<hr key={key++} className="my-2" style={{ borderColor: COLOR.div }} />);
+    }
+    // Empty line — small gap
+    else if (line.trim() === "") {
+      nodes.push(<div key={key++} className="h-1.5" />);
+    }
+    // Normal paragraph
+    else {
+      nodes.push(
+        <p key={key++} className="leading-relaxed">
+          {inlineFormat(line)}
+        </p>
+      );
+    }
+  }
+  return nodes;
+}
+
+// ============== Typewriter component ==============
+function Typewriter({ text, speed = 2, onDone }: { text: string; speed?: number; onDone?: () => void }) {
+  const [displayed, setDisplayed] = useState("");
+  const posRef = useRef(0);
+  const doneRef = useRef(false);
+
+  useEffect(() => {
+    posRef.current = 0;
+    doneRef.current = false;
+    setDisplayed("");
+
+    const tick = () => {
+      if (doneRef.current) return;
+      posRef.current = Math.min(posRef.current + speed, text.length);
+      setDisplayed(text.slice(0, posRef.current));
+      if (posRef.current >= text.length) {
+        doneRef.current = true;
+        onDone?.();
+      } else {
+        requestAnimationFrame(tick);
+      }
+    };
+    const raf = requestAnimationFrame(tick);
+    return () => { doneRef.current = true; cancelAnimationFrame(raf); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text]);
+
+  return <>{renderMarkdown(displayed)}</>;
+}
+
 // ============== Bottom Nav ==============
 export function BottomNav({ current, onGo, notifCount }: { current: Screen; onGo: (s: Screen) => void; notifCount: number }) {
   const items: { key: Screen; label: string; Icon: typeof HomeIcon }[] = [
     { key: "dashboard", label: "Home", Icon: HomeIcon },
-    { key: "chat", label: "Chat", Icon: MessageCircle },
+    { key: "chat", label: "Doctor", Icon: MessageCircle },
     { key: "notifications", label: "Alerts", Icon: Bell },
     { key: "profile", label: "Profile", Icon: SettingsIcon },
   ];
@@ -186,9 +305,9 @@ export function Splash({ onStart }: { onStart: () => void }) {
     <Shell>
       <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
         <Logo size={96} />
-        <div className="mt-6 text-[24px] font-bold tracking-wider" style={{ color: COLOR.text }}>FISHFARM OS</div>
+        <div className="mt-6 text-[24px] font-bold tracking-wider" style={{ color: COLOR.text }}>FISH DOCTOR</div>
         <div className="mt-1 text-[12px] tracking-[0.18em] font-semibold" style={{ color: COLOR.gold }}>GHANA</div>
-        <div className="mt-3 text-[13px]" style={{ color: COLOR.muted }}>Your Smart Fish Farm Assistant</div>
+        <div className="mt-3 text-[13px]" style={{ color: COLOR.muted }}>Your Smart Fish Farming Assistant</div>
 
         <div className="mt-10 w-full">
           <Eyebrow>Choose language</Eyebrow>
@@ -298,7 +417,7 @@ export function Onboarding1({ user, onNext }: { user: User; onNext: (analysis?: 
     <Shell>
       <Progress step={1} total={3} />
       <div className="px-6 pt-5 pb-8 space-y-5">
-        <AmaBubble>Hi {firstName(user.name)}! I'm Ama, your personal farming companion. Let me take a quick look at your pond — upload a photo and I'll have a full report waiting for you once you're set up.</AmaBubble>
+        <AmaBubble>Hi {firstName(user.name)}! I'm Fish Doctor, your personal farming companion. Let me take a quick look at your pond — upload a photo and I'll have a full report waiting for you once you're set up.</AmaBubble>
 
         <button onClick={() => fileRef.current?.click()} className="block w-full rounded-xl py-10 px-4 text-center" style={{ background: COLOR.card, border: `1.5px dashed ${uploaded ? COLOR.gold : COLOR.goldSoft}` }}>
           {loading ? (
@@ -508,7 +627,7 @@ function MainHeader({ user, onGoNotif, onGoProfile, notifCount }: { user: User; 
       <div className="flex items-center gap-2.5">
         <Logo size={32} />
         <div>
-          <div className="text-[13px] font-bold tracking-[0.14em]" style={{ color: COLOR.text }}>FISHFARM OS</div>
+          <div className="text-[13px] font-bold tracking-[0.14em]" style={{ color: COLOR.text }}>FISH DOCTOR</div>
           <div className="text-[10px] font-semibold tracking-[0.18em]" style={{ color: COLOR.gold }}>GHANA</div>
         </div>
       </div>
@@ -585,8 +704,8 @@ export function Dashboard({
             <Quick Icon={Stethoscope} title="Pond Journal" sub="Log daily pond conditions" onClick={() => onGo("pond-journal")} />
             <Quick Icon={Bell} title="Pond Alerts" sub="View all alerts" onClick={() => onGo("weather")} />
             <Quick Icon={BarChart2} title="Market Prices" sub="Check fish prices" onClick={() => onGo("market")} />
-            <Quick Icon={ShoppingBag} title="Buy Supplies" sub="Find quality supplies" onClick={() => onGo("market")} />
-            <Quick Icon={Tag} title="Sell Fish / Buy Fish" sub="Marketplace" onClick={() => onGo("marketplace")} />
+            <Quick Icon={StoreIcon} title="Shop" sub="Fish, feeds & medicine" onClick={() => onGo("shop")} />
+            <Quick Icon={Tag} title="Sell Fish" sub="List your fish for sale" onClick={() => onGo("marketplace")} />
           </div>
         </div>
 
@@ -634,23 +753,37 @@ export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: 
   const ask = useServerFn(askAma);
   const diag = useServerFn(analyzeFishImage);
   const [farm, setFarm] = useState(initialFarm);
+  const [sessionId, setSessionId] = useState<string>(() => String(Date.now()));
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     const h = Store.getChat();
     if (h.length) return h;
     const hour = new Date().getHours();
     const timeGreet = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-    return [{ id: "1", role: "assistant", ts: Date.now(), content: `Hey ${firstName(user.name)}! Good ${timeGreet} 😊 I'm Ama. How are you and your fish doing today?` }];
+    return [{ id: "1", role: "assistant", ts: Date.now(), content: `Hey ${firstName(user.name)}! Good ${timeGreet} 😊 I'm Fish Doctor. How are you and your fish doing today?` }];
   });
   const [input, setInput] = useState("");
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recording, setRecording] = useState(false);
   const [voiceCall, setVoiceCall] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const recRef = useRef<{ stop: () => Promise<string> } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Track which message IDs have already been typewriter-animated so re-entering chat doesn't re-animate
+  const animatedIds = useRef<Set<string>>(new Set(messages.map((m) => m.id)));
 
-  useEffect(() => { Store.setChat(messages); }, [messages]);
+  // Save session whenever messages change
+  useEffect(() => {
+    Store.setChat(messages);
+    if (messages.length > 1) {
+      // Use first user message as title, fallback to "Chat"
+      const firstUser = messages.find((m) => m.role === "user");
+      const title = firstUser ? firstUser.content.slice(0, 40) + (firstUser.content.length > 40 ? "…" : "") : "Chat";
+      Store.saveSession({ id: sessionId, title, messages, ts: Date.now() });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [messages, loading]);
 
   // Parse [[ACTION:{...}]] blocks from AI reply and apply them
@@ -685,7 +818,7 @@ export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: 
       const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region} stockDate=${farm.stockDate}`;
       let reply = "";
       if (image) {
-        const { diagnosis } = await diag({ data: { imageBase64: image } });
+        const { diagnosis } = await diag({ data: { imageBase64: image, userQuestion: trimmed } });
         reply = diagnosis;
         if (trimmed) {
           const r2 = await ask({
@@ -749,37 +882,116 @@ export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: 
 
   const suggestions = ["How are things going?", "Water quality tips", "Any disease signs?", "Market prices today"];
 
+  function startNewChat() {
+    const hour = new Date().getHours();
+    const timeGreet = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+    const newId = String(Date.now());
+    setSessionId(newId);
+    const welcome: ChatMessage = { id: "1", role: "assistant", ts: Date.now(), content: `Hey ${firstName(user.name)}! Good ${timeGreet} 😊 I'm Fish Doctor. How are you and your fish doing today?` };
+    setMessages([welcome]);
+    Store.setChat([welcome]);
+    setShowHistory(false);
+  }
+
+  function loadSession(session: ChatSession) {
+    setSessionId(session.id);
+    setMessages(session.messages);
+    Store.setChat(session.messages);
+    setShowHistory(false);
+  }
+
   return (
     <div className="flex h-screen flex-col" style={{ background: COLOR.bg }}>
       <div className="flex items-center justify-between px-5 pt-5 pb-3" style={{ borderBottom: `1px solid ${COLOR.div}` }}>
         <button onClick={onBack} className="p-1 -ml-1"><ArrowLeft size={22} color={COLOR.text} /></button>
         <div className="text-center">
-          <div className="text-[16px] font-bold" style={{ color: COLOR.text }}>Ama</div>
+          <div className="text-[16px] font-bold" style={{ color: COLOR.text }}>Fish Doctor</div>
           <div className="text-[11px]" style={{ color: COLOR.muted }}>Your AI Companion</div>
         </div>
-        <button
-          onClick={() => setVoiceCall(true)}
-          aria-label="Start voice call"
-          className="h-9 w-9 rounded-full flex items-center justify-center"
-          style={{ background: COLOR.card, border: `1px solid ${COLOR.gold}` }}
-        >
-          <Phone size={16} color={COLOR.gold} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={startNewChat}
+            aria-label="New chat"
+            title="New Chat"
+            className="h-9 w-9 rounded-full flex items-center justify-center"
+            style={{ background: COLOR.card, border: `1px solid ${COLOR.gold}` }}
+          >
+            <SquarePen size={15} color={COLOR.gold} />
+          </button>
+          <button
+            onClick={() => setShowHistory((v) => !v)}
+            aria-label="Chat history"
+            title="History"
+            className="h-9 w-9 rounded-full flex items-center justify-center"
+            style={{ background: showHistory ? COLOR.gold : COLOR.card, border: `1px solid ${COLOR.gold}` }}
+          >
+            <History size={15} color={showHistory ? COLOR.bg : COLOR.gold} />
+          </button>
+          <button
+            onClick={() => setVoiceCall(true)}
+            aria-label="Start voice call"
+            className="h-9 w-9 rounded-full flex items-center justify-center"
+            style={{ background: COLOR.card, border: `1px solid ${COLOR.gold}` }}
+          >
+            <Phone size={15} color={COLOR.gold} />
+          </button>
+        </div>
       </div>
+
+      {/* History Panel */}
+      {showHistory && (
+        <div className="absolute inset-0 z-40 flex flex-col" style={{ background: COLOR.bg, top: 73 }}>
+          <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: `1px solid ${COLOR.div}` }}>
+            <div className="text-[14px] font-semibold" style={{ color: COLOR.text }}>Recent Chats</div>
+            <button onClick={() => setShowHistory(false)}><X size={20} color={COLOR.muted} /></button>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+            {Store.getChatSessions().length === 0 ? (
+              <div className="text-center py-10 text-[13px]" style={{ color: COLOR.muted }}>No saved chats yet.</div>
+            ) : (
+              Store.getChatSessions().map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => loadSession(s)}
+                  className="w-full text-left rounded-xl px-4 py-3 flex items-start justify-between gap-3"
+                  style={{ background: s.id === sessionId ? COLOR.card2 : COLOR.card, border: `1px solid ${s.id === sessionId ? COLOR.gold : COLOR.div}` }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold truncate" style={{ color: COLOR.text }}>{s.title}</div>
+                    <div className="text-[11px] mt-0.5" style={{ color: COLOR.muted }}>
+                      {s.messages.length - 1} messages · {new Date(s.ts).toLocaleDateString("en-GH", { day: "numeric", month: "short" })}
+                    </div>
+                  </div>
+                  <MessageCircle size={14} color={COLOR.gold} style={{ flexShrink: 0, marginTop: 2 }} />
+                </button>
+              ))
+            )}
+          </div>
+          <div className="px-4 pb-6 pt-2">
+            <button
+              onClick={startNewChat}
+              className="w-full rounded-xl h-12 flex items-center justify-center gap-2 text-[14px] font-semibold"
+              style={{ background: COLOR.gold, color: COLOR.bg }}
+            >
+              <SquarePen size={16} /> New Chat
+            </button>
+          </div>
+        </div>
+      )}
 
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 pt-4 pb-2 space-y-4 no-scrollbar">
-        {messages.map((m) => (
+        {messages.map((m, idx) => (
           <div key={m.id} className={m.role === "user" ? "flex justify-end" : "flex gap-2"}>
             {m.role === "assistant" && (
               <div className="h-8 w-8 shrink-0 rounded-full overflow-hidden" style={{ border: `1px solid ${COLOR.gold}` }}>
-                <img src="/logo.png" alt="Ama" className="h-full w-full object-cover" />
+                <img src="/logo.png" alt="Fish Doctor" className="h-full w-full object-cover" />
               </div>
             )}
             <div className="max-w-[78%]">
-              {m.role === "assistant" && <div className="mb-1"><Eyebrow gold>AMA</Eyebrow></div>}
+              {m.role === "assistant" && <div className="mb-1"><Eyebrow gold>FISH DOCTOR</Eyebrow></div>}
               <div
-                className="rounded-2xl px-4 py-2.5 text-[14.5px] leading-snug whitespace-pre-wrap"
+                className="rounded-2xl px-4 py-2.5 text-[14.5px] leading-snug"
                 style={{
                   background: m.role === "user" ? COLOR.card2 : COLOR.card,
                   border: `1px solid ${m.role === "user" ? COLOR.goldSoft : COLOR.div}`,
@@ -789,7 +1001,12 @@ export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: 
                 }}
               >
                 {m.image && <img src={m.image} alt="" className="mb-2 rounded-lg max-h-48 object-cover" />}
-                {m.content}
+                {m.role === "assistant"
+                  ? !animatedIds.current.has(m.id)
+                    ? <Typewriter text={m.content} speed={2} onDone={() => animatedIds.current.add(m.id)} />
+                    : <>{renderMarkdown(m.content)}</>
+                  : m.content
+                }
               </div>
               <div className={`mt-1 text-[10px] ${m.role === "user" ? "text-right" : ""}`} style={{ color: COLOR.muted }}>
                 {new Date(m.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
@@ -844,7 +1061,7 @@ export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: 
           </button>
           <input
             value={input} onChange={(e) => setInput(e.target.value)}
-            placeholder={recording ? "Listening…" : pendingImage ? "Add a message (optional)" : "Talk to Ama..."}
+            placeholder={recording ? "Listening…" : pendingImage ? "Add a message (optional)" : "Ask Fish Doctor..."}
             className="flex-1 bg-transparent text-[14px] outline-none"
             style={{ color: COLOR.text }}
           />
@@ -864,115 +1081,73 @@ export function Chat({ user, farm: initialFarm, onBack, onFarmUpdate }: { user: 
   );
 }
 
-// ---------- Voice Call (real-time speech to speech) ----------
+// ---------- Voice Call (Gemini Live – real-time bidirectional audio) ----------
 function VoiceCall({
   user, farm, onTurn, onClose,
 }: { user: User; farm: Farm; onTurn: (u: string, a: string) => void; onClose: () => void }) {
-  const ask = useServerFn(askAma);
-  const [status, setStatus] = useState<"connecting" | "listening" | "thinking" | "speaking">("connecting");
+  const [status, setStatus] = useState<"connecting" | "listening" | "thinking" | "speaking" | "error">("connecting");
   const [level, setLevel] = useState(0);
   const [lastUser, setLastUser] = useState("");
-  const [lastAma, setLastAma] = useState("");
+  const [lastFishDoctor, setLastFishDoctor] = useState("");
   const [muted, setMuted] = useState(false);
-  const activeRef = useRef(true);
-  const mutedRef = useRef(false);
-  const historyRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
-
-  useEffect(() => { mutedRef.current = muted; }, [muted]);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const callRef = useRef<import("@/lib/gemini-live").GeminiLiveCall | null>(null);
+  const lastUserRef = useRef("");
 
   useEffect(() => {
-    activeRef.current = true;
-    historyRef.current = [];
-    void loop();
-    return () => {
-      activeRef.current = false;
-      if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const context = `You are speaking with a fish farmer. Their farm: pondCount=${farm.pondCount}, fishCount=${farm.fishCount}, fishType=${farm.fishType}, fishSize=${farm.fishSize}, farmName=${user.farmName}, region=${user.region}. Farmer language preference: ${user.language}. ${SYSTEM_PROMPT}`;
+
+    import("@/lib/gemini-live").then(({ GeminiLiveCall }) => {
+      const call = new GeminiLiveCall(context, {
+        onStatusChange: (s) => setStatus(s),
+        onUserText: (t) => { lastUserRef.current = t; setLastUser(t); },
+        onAssistantText: (t) => { setLastFishDoctor(t); onTurn(lastUserRef.current, t); },
+        onLevel: (l) => setLevel(l),
+        onError: (e) => setErrorMsg(e),
+      });
+      callRef.current = call;
+      void call.start();
+    });
+
+    return () => { callRef.current?.stop(); callRef.current = null; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loop() {
-    while (activeRef.current) {
-      try {
-        setStatus("listening");
-        const text = await listenUntilSilence(activeRef, mutedRef, (l) => setLevel(l));
-        if (!activeRef.current) return;
-        if (!text || text.trim().length < 2) continue;
-        setLastUser(text);
-        setStatus("thinking");
-        historyRef.current.push({ role: "user", content: text });
-        const context = `pondCount=${farm.pondCount} fishCount=${farm.fishCount} fishType=${farm.fishType} fishSize=${farm.fishSize} farm=${user.farmName} region=${user.region}`;
-        const r = await ask({
-          data: { messages: historyRef.current.slice(-12), language: user.language, farmContext: context },
-        });
-        if (!activeRef.current) return;
-        const clean = (r.displayReply || r.reply.replace(/\[\[ACTION:[\s\S]*?\]\]/g, "").trim() || "I didn't catch that, please repeat.");
-        historyRef.current.push({ role: "assistant", content: clean });
-        setLastAma(clean);
-        onTurn(text, clean);
-        setStatus("speaking");
-        await speakAsync(clean, user.language === "Twi");
-      } catch {
-        if (!activeRef.current) return;
-        await new Promise((r) => setTimeout(r, 600));
-      }
-    }
-  }
-
-  function end() {
-    activeRef.current = false;
-    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
-    onClose();
-  }
+  function end() { callRef.current?.stop(); callRef.current = null; onClose(); }
 
   const ring = Math.min(1, level * 6);
   const statusLabel =
     status === "connecting" ? "Connecting…" :
     status === "listening" ? (muted ? "Muted" : "Listening…") :
-    status === "thinking" ? "Ama is thinking…" : "Ama is speaking…";
+    status === "thinking" ? "Fish Doctor is thinking…" :
+    status === "speaking" ? "Fish Doctor is speaking…" : "Error";
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-between px-6 py-10" style={{ background: "rgba(15,15,18,0.98)" }}>
       <div className="w-full flex items-center justify-between">
-        <div className="text-[12px] uppercase tracking-[0.18em]" style={{ color: COLOR.muted }}>Live with Ama</div>
+        <div className="text-[12px] uppercase tracking-[0.18em]" style={{ color: COLOR.muted }}>Live with Fish Doctor</div>
         <button onClick={end} aria-label="Close" className="p-1"><X size={22} color={COLOR.muted} /></button>
       </div>
 
       <div className="flex flex-col items-center gap-6">
         <div className="relative flex items-center justify-center">
-          <span
-            className="absolute rounded-full"
-            style={{
-              width: 220 + ring * 60, height: 220 + ring * 60,
-              background: "transparent",
-              border: `1px solid ${COLOR.goldSoft}`,
-              opacity: 0.5,
-              transition: "all 80ms linear",
-            }}
-          />
-          <span
-            className="absolute rounded-full"
-            style={{
-              width: 170 + ring * 40, height: 170 + ring * 40,
-              background: COLOR.card,
-              border: `1px solid ${COLOR.gold}`,
-              transition: "all 80ms linear",
-            }}
-          />
-          <div className="relative h-32 w-32 rounded-full flex items-center justify-center" style={{ background: COLOR.card2, border: `2px solid ${COLOR.gold}` }}>
-            {status === "thinking" ? (
+          <span className="absolute rounded-full" style={{ width: 220 + ring * 60, height: 220 + ring * 60, background: "transparent", border: `1px solid ${COLOR.goldSoft}`, opacity: 0.5, transition: "all 80ms linear" }} />
+          <span className="absolute rounded-full" style={{ width: 170 + ring * 40, height: 170 + ring * 40, background: COLOR.card, border: `1px solid ${COLOR.gold}`, transition: "all 80ms linear" }} />
+          <div className="relative h-32 w-32 rounded-full overflow-hidden flex items-center justify-center" style={{ background: COLOR.card2, border: `2px solid ${COLOR.gold}` }}>
+            {status === "thinking" || status === "connecting" ? (
               <Loader2 size={36} color={COLOR.gold} className="animate-spin" />
             ) : status === "speaking" ? (
               <Volume2 size={36} color={COLOR.gold} />
             ) : (
-              <Radio size={36} color={COLOR.gold} />
+              <img src="/logo.png" alt="Fish Doctor" className="h-full w-full object-cover" />
             )}
           </div>
         </div>
 
         <div className="text-center">
-          <div className="text-[18px] font-semibold" style={{ color: COLOR.text }}>Ama</div>
-          <div className="text-[13px] mt-1" style={{ color: COLOR.gold }}>{statusLabel}</div>
+          <div className="text-[18px] font-semibold" style={{ color: COLOR.text }}>Fish Doctor</div>
+          <div className="text-[13px] mt-1" style={{ color: status === "error" ? COLOR.danger : COLOR.gold }}>{statusLabel}</div>
+          {errorMsg && <div className="text-[11px] mt-1 px-4 text-center" style={{ color: COLOR.danger }}>{errorMsg}</div>}
         </div>
 
         <div className="max-w-sm w-full space-y-2 min-h-[80px]">
@@ -981,29 +1156,21 @@ function VoiceCall({
               <span style={{ color: COLOR.gold }}>You: </span>{lastUser}
             </div>
           )}
-          {lastAma && (
+          {lastFishDoctor && (
             <div className="rounded-xl px-3 py-2 text-[13px]" style={{ background: COLOR.card2, border: `1px solid ${COLOR.goldSoft}`, color: COLOR.text }}>
-              <span style={{ color: COLOR.gold }}>Ama: </span>{lastAma}
+              <span style={{ color: COLOR.gold }}>Fish Doctor: </span>{lastFishDoctor}
             </div>
           )}
         </div>
       </div>
 
       <div className="flex items-center gap-6">
-        <button
-          onClick={() => setMuted((m) => !m)}
-          aria-label={muted ? "Unmute" : "Mute"}
+        <button onClick={() => setMuted((m) => !m)} aria-label={muted ? "Unmute" : "Mute"}
           className="h-14 w-14 rounded-full flex items-center justify-center"
-          style={{ background: muted ? COLOR.card2 : COLOR.card, border: `1px solid ${muted ? COLOR.danger : COLOR.div}` }}
-        >
+          style={{ background: muted ? COLOR.card2 : COLOR.card, border: `1px solid ${muted ? COLOR.danger : COLOR.div}` }}>
           <Mic size={22} color={muted ? COLOR.danger : COLOR.text} />
         </button>
-        <button
-          onClick={end}
-          aria-label="End call"
-          className="h-16 w-16 rounded-full flex items-center justify-center"
-          style={{ background: COLOR.danger }}
-        >
+        <button onClick={end} aria-label="End call" className="h-16 w-16 rounded-full flex items-center justify-center" style={{ background: COLOR.danger }}>
           <PhoneOff size={26} color={COLOR.text} />
         </button>
       </div>
@@ -1023,6 +1190,7 @@ async function listenUntilSilence(
   rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
   rec.start();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
   const src = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
@@ -1076,11 +1244,6 @@ async function listenUntilSilence(
   const j = (await res.json()) as { text?: string };
   return (j.text || "").trim();
 }
-
-function speakAsync(text: string, _twi: boolean): Promise<void> {
-  return speakGemini(text);
-}
-
 
 // ---------- Feed Calculator ----------
 export function FeedCalc({ farm: initialFarm, onBack }: { farm: Farm; onBack: () => void }) {
@@ -1562,7 +1725,7 @@ export function Marketplace({ user, farm, onBack }: { user: User; farm: Farm; on
 
   return (
     <Shell>
-      <TopBar onBack={onBack} title="Sell Fish / Buy Fish" />
+      <TopBar onBack={onBack} title="Sell Fish" />
       <div className="px-5 pb-8 space-y-4">
 
         {/* Tab switcher */}
@@ -1740,6 +1903,217 @@ export function Marketplace({ user, farm, onBack }: { user: User; farm: Farm; on
   );
 }
 
+// ---------- Shop ----------
+type ShopCategory = "fish" | "feeds" | "medicine";
+type ShopListing = {
+  id: string;
+  sellerName: string;
+  sellerPhone: string;
+  region: string;
+  category: ShopCategory;
+  name: string;
+  description: string;
+  price: number;
+  unit: string;
+  image?: string;
+  ts: number;
+};
+const SHOP_KEY = "ffo.shop";
+function getShopListings(): ShopListing[] {
+  if (typeof window === "undefined") return [];
+  try { const v = window.localStorage.getItem(SHOP_KEY); return v ? (JSON.parse(v) as ShopListing[]) : []; } catch { return []; }
+}
+function setShopListings(l: ShopListing[]) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(SHOP_KEY, JSON.stringify(l)); } catch {}
+}
+
+export function Shop({ user, onBack }: { user: User; onBack: () => void }) {
+  const [tab, setTab] = useState<"browse" | "post">("browse");
+  const [category, setCategory] = useState<ShopCategory>("fish");
+  const [listings, setListings] = useState<ShopListing[]>(() => getShopListings());
+  // post form
+  const [postCat, setPostCat] = useState<ShopCategory>("fish");
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [price, setPrice] = useState(0);
+  const [unit, setUnit] = useState("kg");
+  const [image, setImage] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const CATS: { key: ShopCategory; label: string; emoji: string }[] = [
+    { key: "fish", label: "Fish", emoji: "🐟" },
+    { key: "feeds", label: "Feeds", emoji: "🌾" },
+    { key: "medicine", label: "Medicine", emoji: "💊" },
+  ];
+
+  const filtered = listings.filter((l) => l.category === category);
+
+  async function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]; if (!f) return;
+    const dataUrl = await new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.readAsDataURL(f); });
+    setImage(dataUrl); e.target.value = "";
+  }
+
+  function post() {
+    if (!name.trim() || price <= 0) return;
+    setPosting(true);
+    const item: ShopListing = {
+      id: String(Date.now()),
+      sellerName: user.name,
+      sellerPhone: user.phone,
+      region: user.region,
+      category: postCat,
+      name: name.trim(),
+      description: description.trim(),
+      price,
+      unit,
+      image: image ?? undefined,
+      ts: Date.now(),
+    };
+    const next = [item, ...listings];
+    setShopListings(next);
+    setListings(next);
+    setPosting(false);
+    setTab("browse");
+    setCategory(postCat);
+    setName(""); setDescription(""); setPrice(0); setUnit("kg"); setImage(null);
+  }
+
+  return (
+    <Shell>
+      <TopBar onBack={onBack} title="Shop" />
+      <div className="px-5 pb-8 space-y-4">
+
+        {/* Main tab */}
+        <div className="flex rounded-xl overflow-hidden" style={{ border: `1px solid ${COLOR.div}` }}>
+          {(["browse", "post"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)} className="flex-1 py-2.5 text-[13px] font-semibold"
+              style={{ background: tab === t ? COLOR.gold : COLOR.card, color: tab === t ? COLOR.bg : COLOR.muted }}>
+              {t === "browse" ? "Browse" : "+ List Item"}
+            </button>
+          ))}
+        </div>
+
+        {tab === "browse" && (
+          <>
+            {/* Category pills */}
+            <div className="flex gap-2">
+              {CATS.map((c) => (
+                <button key={c.key} onClick={() => setCategory(c.key)}
+                  className="flex-1 py-2 rounded-xl text-[13px] font-semibold"
+                  style={{ border: `1px solid ${category === c.key ? COLOR.gold : COLOR.div}`, color: category === c.key ? COLOR.gold : COLOR.muted, background: COLOR.card }}>
+                  {c.emoji} {c.label}
+                </button>
+              ))}
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="flex flex-col items-center py-12 gap-3">
+                <ShoppingBag size={32} color={COLOR.muted} />
+                <div className="text-[13px]" style={{ color: COLOR.muted }}>No {category} listed yet.</div>
+                <button onClick={() => setTab("post")} className="text-[13px] font-semibold" style={{ color: COLOR.gold }}>Be the first to list →</button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filtered.map((l) => (
+                  <Card key={l.id}>
+                    <div className="flex gap-3">
+                      {l.image && <img src={l.image} alt="" className="h-16 w-16 rounded-lg object-cover shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="text-[14px] font-bold truncate" style={{ color: COLOR.text }}>{l.name}</div>
+                          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 uppercase" style={{ background: "#1A3A1A", color: COLOR.ok }}>{l.category}</span>
+                        </div>
+                        <div className="text-[13px] font-bold mt-0.5" style={{ color: COLOR.gold }}>{fmtGHS(l.price)}/{l.unit}</div>
+                        {l.description && <div className="text-[11px] mt-0.5" style={{ color: COLOR.muted }}>{l.description}</div>}
+                        <div className="text-[11px] mt-1" style={{ color: COLOR.muted }}>{l.sellerName} · {l.region}</div>
+                      </div>
+                    </div>
+                    <button className="mt-2 w-full py-1.5 rounded-lg text-[12px] font-semibold"
+                      style={{ border: `1px solid ${COLOR.goldSoft}`, color: COLOR.gold }}>
+                      Contact · {l.sellerPhone}
+                    </button>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === "post" && (
+          <div className="space-y-4">
+            <AmaBubble>List your fish, feeds, or medicine for other farmers to buy. Add a photo to get more attention!</AmaBubble>
+
+            {/* Category selector */}
+            <div className="flex gap-2">
+              {CATS.map((c) => (
+                <button key={c.key} onClick={() => setPostCat(c.key)}
+                  className="flex-1 py-2.5 rounded-xl text-[13px] font-semibold"
+                  style={{ border: `1px solid ${postCat === c.key ? COLOR.gold : COLOR.div}`, color: postCat === c.key ? COLOR.gold : COLOR.muted, background: COLOR.card }}>
+                  {c.emoji} {c.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Photo */}
+            <button onClick={() => fileRef.current?.click()} className="w-full rounded-xl overflow-hidden"
+              style={{ border: `1.5px dashed ${image ? COLOR.gold : COLOR.goldSoft}` }}>
+              {image ? (
+                <div className="relative">
+                  <img src={image} alt="" className="w-full h-48 object-cover" />
+                  <div className="absolute top-2 right-2 rounded-full p-1.5" style={{ background: "rgba(0,0,0,0.6)" }}>
+                    <Camera size={16} color={COLOR.gold} />
+                  </div>
+                </div>
+              ) : (
+                <div className="py-8 flex flex-col items-center gap-2">
+                  <Camera size={28} color={COLOR.gold} />
+                  <div className="text-[13px] font-semibold" style={{ color: COLOR.gold }}>Add Photo</div>
+                  <div className="text-[11px]" style={{ color: COLOR.muted }}>Upload a product photo</div>
+                </div>
+              )}
+            </button>
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={onPickImage} />
+
+            <Field label="Product Name">
+              <input value={name} onChange={(e) => setName(e.target.value)}
+                placeholder={postCat === "fish" ? "e.g. Fresh Tilapia" : postCat === "feeds" ? "e.g. Coppens Feed 3mm" : "e.g. Potassium Permanganate"}
+                className="w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text }} />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Price (GHS)">
+                <input inputMode="numeric" value={price || ""} onChange={(e) => setPrice(Number(e.target.value.replace(/[^0-9]/g, "")) || 0)}
+                  placeholder="e.g. 50" className="w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text }} />
+              </Field>
+              <Field label="Unit">
+                <select value={unit} onChange={(e) => setUnit(e.target.value)}
+                  className="w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text }}>
+                  {["kg", "bag", "piece", "box", "litre", "sachet"].map((u) => (
+                    <option key={u} value={u} style={{ background: COLOR.card }}>{u}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+
+            <Field label="Description (optional)">
+              <input value={description} onChange={(e) => setDescription(e.target.value)}
+                placeholder="Any details, quantity available, delivery options…"
+                className="w-full bg-transparent outline-none text-[15px]" style={{ color: COLOR.text }} />
+            </Field>
+
+            <Btn variant="solid" onClick={post} disabled={posting || !name.trim() || price <= 0}>
+              {posting ? "Listing…" : "List for Sale"}
+            </Btn>
+          </div>
+        )}
+      </div>
+    </Shell>
+  );
+}
+
 // ---------- Credit Score ----------
 export function CreditScore({ user, farm, onBack }: { user: User; farm: Farm; onBack: () => void }) {
   const profileComplete = Boolean(user.name && user.phone && user.farmName && farm.lat);
@@ -1872,13 +2246,13 @@ export function Profile({ user, farm, score, onBack, onLogout, onGo, onUserUpdat
             <Trash2 size={18} color={COLOR.danger} />
             <span className="text-[14px]" style={{ color: COLOR.danger }}>Clear All Data</span>
           </button>
-          <button onClick={() => { if (confirm("Log out of FishFarm OS?")) onLogout(); }} className="w-full rounded-xl p-4 flex items-center justify-center gap-2 mt-3" style={{ background: COLOR.gold, color: COLOR.bg }}>
+          <button onClick={() => { if (confirm("Log out of Fish Doctor?")) onLogout(); }} className="w-full rounded-xl p-4 flex items-center justify-center gap-2 mt-3" style={{ background: COLOR.gold, color: COLOR.bg }}>
             <LogIn size={18} />
             <span className="text-[14px] font-semibold">Log Out</span>
           </button>
         </div>
 
-        <div className="text-center text-[11px]" style={{ color: COLOR.nav }}>FishFarm OS Ghana v1.0 · Made in Ghana</div>
+        <div className="text-center text-[11px]" style={{ color: COLOR.nav }}>Fish Doctor Ghana v1.0 · Made in Ghana</div>
       </div>
 
       {keyOpen && (
@@ -1938,7 +2312,7 @@ export function Notifications({ notifs, onBack, onRead }: { notifs: Notif[]; onB
             <div className="flex flex-col items-center py-6 gap-2">
               <Bell size={32} color={COLOR.muted} />
               <div className="text-[13px]" style={{ color: COLOR.muted }}>You're all caught up!</div>
-              <div className="text-[11px] text-center" style={{ color: COLOR.nav }}>Ama will notify you about your fish, weather, and market updates here.</div>
+              <div className="text-[11px] text-center" style={{ color: COLOR.nav }}>Fish Doctor will notify you about your fish, weather, and market updates here.</div>
             </div>
           </Card>
         )}

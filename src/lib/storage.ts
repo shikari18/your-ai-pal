@@ -36,6 +36,13 @@ export type ChatMessage = {
   image?: string;
   ts: number;
 };
+
+export type ChatSession = {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  ts: number; // last updated
+};
 export type Notif = { id: string; title: string; body: string; ts: number; read?: boolean; kind: "weather" | "feed" | "harvest" | "system" | "ai" };
 
 export type FishListing = {
@@ -57,6 +64,7 @@ const K = {
   farm: "ffo.farm",
   feed: "ffo.feedLogs",
   chat: "ffo.chat",
+  chatSessions: "ffo.chatSessions",
   notif: "ffo.notif",
   listings: "ffo.listings",
   twi: "twiVoice",
@@ -94,6 +102,16 @@ export const Store = {
   setPondLogs: (l: PondLog[]) => write("ffo.pondLogs", l),
   getChat: (): ChatMessage[] => read<ChatMessage[]>(K.chat, []),
   setChat: (m: ChatMessage[]) => write(K.chat, m),
+  getChatSessions: (): ChatSession[] => read<ChatSession[]>(K.chatSessions, []),
+  setChatSessions: (s: ChatSession[]) => write(K.chatSessions, s),
+  saveSession: (session: ChatSession) => {
+    const sessions = read<ChatSession[]>(K.chatSessions, []);
+    const idx = sessions.findIndex((s) => s.id === session.id);
+    if (idx >= 0) sessions[idx] = session;
+    else sessions.unshift(session);
+    // Keep max 20 sessions
+    write(K.chatSessions, sessions.slice(0, 20));
+  },
   getNotifs: (): Notif[] => read<Notif[]>(K.notif, []),
   setNotifs: (n: Notif[]) => write(K.notif, n),
   getListings: (): FishListing[] => read<FishListing[]>(K.listings, []),

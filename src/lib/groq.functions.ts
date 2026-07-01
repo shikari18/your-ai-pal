@@ -4,7 +4,7 @@ const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const CHAT_MODEL = "llama-3.3-70b-versatile";
 const VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
-export const SYSTEM_PROMPT = `You are Ama, a friendly AI companion for Ghanaian fish farmers built into FishFarm OS Ghana.
+export const SYSTEM_PROMPT = `You are Fish Doctor, a friendly AI companion for Ghanaian fish farmers built into Fish Doctor Ghana.
 
 PERSONALITY:
 - You are warm, conversational, and feel like a trusted friend the farmer can talk to anytime
@@ -20,6 +20,21 @@ FISH EXPERTISE (when needed):
 - For market: give specific advice based on current price trends
 - For weather: translate weather data into direct farm actions
 - Reference the farmer's actual data when available
+
+STRICT PROMPT FOLLOWING:
+- Always answer exactly what the user asked. If they ask "what is the name of this fish?", give the fish name first and foremost — do not default to a disease or health analysis unless asked
+- If an image is provided AND the user asks a specific question about it, answer THAT question directly using the image
+- Do not redirect or reframe the user's question — answer what was asked
+- If the user asks for a name, give the name. If they ask for a disease, give the disease. Match your answer to the intent
+
+FORMATTING RULES (CRITICAL — always follow these):
+- Use ## for section headings (these will render as styled headers)
+- Use **word** for bold/important text
+- Use *word* for emphasis
+- Use - item for bullet lists
+- Use 1. item for numbered lists
+- Never output raw ## or ** in plain text — these are formatting markers and will be rendered visually
+- Keep responses well-structured and easy to scan
 
 LANGUAGE:
 - Respond in the farmer's selected language (Twi if set)
@@ -71,8 +86,8 @@ export const askAma = createServerFn({ method: "POST" })
     const reply = await groqChat({
       model: CHAT_MODEL,
       messages: [{ role: "system", content: sys }, ...data.messages],
-      max_tokens: 500,
-      temperature: 0.8,
+      max_tokens: 300,
+      temperature: 0.7,
     });
     // Return the full reply (including action blocks) so the client can parse them,
     // but also return a clean version for display
@@ -109,11 +124,62 @@ export const analyzePondImage = createServerFn({ method: "POST" })
 
 export const analyzeFishImage = createServerFn({ method: "POST" })
   .validator((d: unknown) => {
-    const x = d as { imageBase64: string };
+    const x = d as { imageBase64: string; userQuestion?: string };
     if (!x?.imageBase64) throw new Error("imageBase64 required");
-    return x;
+    return { imageBase64: x.imageBase64, userQuestion: x.userQuestion ?? "" };
   })
   .handler(async ({ data }) => {
+    // Determine intent: identification vs health diagnosis
+    const q = data.userQuestion.toLowerCase();
+    const isIdentification =
+      q.includes("name") || q.includes("what is") || q.includes("what fish") ||
+      q.includes("which fish") || q.includes("identify") || q.includes("type of fish") ||
+      q.includes("kind of fish") || q.includes("species") || (!q && false);
+
+    const identifyPrompt = `You are an expert fish biologist and aquaculture specialist. The user wants to know what kind of fish is in this image.
+
+Your task:
+1. Identify the fish species accurately by examining the image
+2. Give the common name AND scientific name
+3. Mention if it is found in Ghana or West Africa
+4. Give 2-3 interesting facts about this fish
+
+Format your response using these sections:
+## Fish Identified
+**Common Name:** [name]
+**Scientific Name:** [name]
+**Found in Ghana:** Yes/No/Common
+
+## About This Fish
+- [fact 1]
+- [fact 2]
+- [fact 3]
+
+Be confident and specific. Do NOT default to a health diagnosis — the user wants identification.`;
+
+    const diagnosisPrompt = `You are an expert aquaculture veterinarian in Ghana. Analyse this fish or pond image and provide a health/disease assessment.
+
+## Disease
+[most likely disease or water-quality issue]
+
+## Symptoms
+- [visual sign 1]
+- [visual sign 2]
+- [visual sign 3]
+
+## Treatment
+[locally available treatment in Ghana with dosage]
+
+## Feeding Adjustment
+[any feeding change needed]
+
+## Urgency
+**LOW / MEDIUM / HIGH**
+
+No medical jargon. Use plain language a farmer understands.`;
+
+    const userPromptText = isIdentification ? identifyPrompt : (data.userQuestion ? `The user asked: "${data.userQuestion}"\n\nAnswer their specific question using the image. ${diagnosisPrompt}` : diagnosisPrompt);
+
     const reply = await groqChat({
       model: VISION_MODEL,
       max_tokens: 700,
@@ -121,16 +187,7 @@ export const analyzeFishImage = createServerFn({ method: "POST" })
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `You are an expert aquaculture veterinarian in Ghana. Analyse this fish or pond image. Reply in clean readable text a farmer understands, using these labelled sections exactly:
-DISEASE: (most likely disease or water-quality issue, 4-7 words)
-SYMPTOMS: three short bullets of visual signs
-TREATMENT: locally available treatment in Ghana with dosage
-FEEDING: feeding adjustment needed
-URGENCY: LOW or MEDIUM or HIGH
-No medical jargon.`,
-            },
+            { type: "text", text: userPromptText },
             { type: "image_url", image_url: { url: data.imageBase64 } },
           ],
         },
@@ -142,7 +199,7 @@ No medical jargon.`,
 export const generateBriefing = createServerFn({ method: "POST" })
   .validator((d: unknown) => d as { name: string; fishCount: number; fishType: string; farmName: string; region: string; weather: string; timeOfDay: string })
   .handler(async ({ data }) => {
-    const prompt = `You are Ama, a friendly AI companion for a Ghanaian fish farmer. Write a short, warm, friendly reminder for ${data.name} who has ${data.fishCount} ${data.fishType} at ${data.farmName} in ${data.region}. Current weather: ${data.weather}. Time: ${data.timeOfDay}. Write 1-2 sentences max — a gentle nudge about the single most important thing to do right now. Be warm and friendly like a helpful friend. IMPORTANT: Output plain text only — no JSON, no action blocks, no brackets, nothing but the reminder text.`;
+    const prompt = `You are Fish Doctor, a friendly AI companion for a Ghanaian fish farmer. Write a short, warm, friendly reminder for ${data.name} who has ${data.fishCount} ${data.fishType} at ${data.farmName} in ${data.region}. Current weather: ${data.weather}. Time: ${data.timeOfDay}. Write 1-2 sentences max — a gentle nudge about the single most important thing to do right now. Be warm and friendly like a helpful friend. IMPORTANT: Output plain text only — no JSON, no action blocks, no brackets, nothing but the reminder text.`;
     const reply = await groqChat({
       model: CHAT_MODEL,
       messages: [{ role: "user", content: prompt }],

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import {
   Splash, Register, Onboarding1, Onboarding2, Onboarding3,
-  Dashboard, Chat, FeedCalc, PondJournal, Weather, Market, Sell, Marketplace,
+  Dashboard, Chat, FeedCalc, PondJournal, Weather, Market, Sell, Marketplace, Shop,
   CreditScore, Profile, Notifications, BottomNav, Shell,
   type Screen,
 } from "@/components/screens";
@@ -13,7 +13,7 @@ import { generateBriefing } from "@/lib/groq.functions";
 import { speak } from "@/lib/voice";
 
 export const Route = createFileRoute("/")({
-  head: () => ({ meta: [{ title: "FishFarm OS Ghana" }] }),
+  head: () => ({ meta: [{ title: "Fish Doctor Ghana" }] }),
   component: App,
 });
 
@@ -154,6 +154,7 @@ function App() {
   else if (screen === "market") body = <Market user={user} onBack={() => setScreen("dashboard")} />;
   else if (screen === "sell") body = <Sell user={user} farm={farm} onBack={() => setScreen("dashboard")} />;
   else if (screen === "marketplace") body = <Marketplace user={user} farm={farm} onBack={() => setScreen("dashboard")} />;
+  else if (screen === "shop") body = <Shop user={user} onBack={() => setScreen("dashboard")} />;
   else if (screen === "credit-score") body = <CreditScore user={user} farm={farm} onBack={() => setScreen("profile")} />;
   else if (screen === "notifications") body = <Notifications notifs={notifs} onBack={() => setScreen("dashboard")} onRead={() => {
     const n = Store.getNotifs().map((x) => ({ ...x, read: true })); Store.setNotifs(n); setNotifs(n);
